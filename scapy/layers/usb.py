@@ -17,16 +17,34 @@ import subprocess
 from scapy.config import conf
 from scapy.consts import WINDOWS
 from scapy.compat import chb, plain_str
-from scapy.data import MTU, DLT_USBPCAP
+from scapy.data import MTU, DLT_USBPCAP, DLT_USB_LINUX
 from scapy.error import warning
-from scapy.fields import ByteField, XByteField, ByteEnumField, LEShortField, \
-    LEShortEnumField, LEIntField, LEIntEnumField, XLELongField, \
-    LenField
+from scapy.fields import (
+    BitEnumField,
+    BitField,
+    ByteEnumField,
+    ByteField,
+    LEIntEnumField,
+    LEIntField,
+    LEShortEnumField,
+    LEShortField,
+    LESignedIntField,
+    LESignedLongField,
+    LenField,
+    MultipleTypeField,
+    PacketField,
+    StrFixedLenField,
+    XByteField,
+    XLEIntField,
+    XLELongField,
+)
 from scapy.packet import Packet, bind_top_down
 from scapy.supersocket import SuperSocket
 from scapy.utils import PcapReader
 
-# USBpcap
+###########
+# USBpcap #
+###########
 
 _usbd_status_codes = {
     0x00000000: "Success",
@@ -38,7 +56,9 @@ _usbd_status_codes = {
 _transfer_types = {
     0x0: "Isochronous",
     0x1: "Interrupt",
-    0x2: "Control"
+    0x2: "Control",
+    0x3: "Bulk",
+    0xFF: "Unknown"
 }
 
 # From https://github.com/wireshark/wireshark/blob/master/epan/dissectors/packet-usb.c  # noqa: E501
@@ -242,3 +262,82 @@ if WINDOWS:
             self.usbpcap_proc.kill()
 
     conf.USBsocket = USBpcapSocket
+
+
+##########
+# USBMON #
+##########
+
+_usbmon_types = {
+    0x43: "URB_COMPLETE (C)",
+    0x45: "URB_ERROR (E)",
+    0x53: "URB_SUBMIT (S)",
+}
+
+
+class USBmonSetupData(Packet):
+    name = "USBmon URB Setup data"
+    fields_desc = [
+        XByteField("bmRequestType", 0),
+        XByteField("bRequest", 0),
+        XLEShortField("wValue", 0),
+        LEShortField("wIndex", 0),
+        LEShortField("wLength", 0),
+    ]
+
+
+class USBmon(Packet):
+    name = "USBmon URB"
+    # https://github.com/torvalds/linux/blob/master/Documentation/usb/usbmon.rst#raw-binary-format-and-api
+    fields_desc = [
+        XLELongField("id", 0),
+        ByteEnumField("type", 0xFF, _usbmon_types),
+        XByteEnumField("transfer", 0, _transfer_types),
+        BitEnumField("direction", 1, 1, {0: "OUT", 1: "IN"}),
+        BitField("_res", 0, 3),
+        BitField("epnum", 0, 4),
+        ByteField("dev_id", 0),
+        LEShortField("bus_id", 0),
+        XByteField("setup_flat", 0),
+        XByteEnumField("data_flag", 0, {0: "present"}),
+        LESignedLongField("urb_ts_sec", 0),
+        LESignedIntField("urb_ts_usec", 0),
+        LESignedIntField("urb_status", 0),  # could be intEnum with negative Errno
+        LEIntField("urb_length", 0),
+        LEIntField("data_len", 0),
+        ConditionalField(
+            LEIntField("error_count", 0),
+            lambda pkt: pkt.transfer == 0x0),
+        ConditionalField(
+            LEIntField("numdesc", 0),
+            lambda pkt: pkt.transfer == 0x0),
+        ConditionalField(
+            PacketField("setup", None, USBmonSetupData),
+            lambda pkt: pkt.transfer == 0x2),
+        ConditionalField(
+            StrFixedLenField("unused", 0, 8),
+            lambda pkt: pkt.transfer not in [0x0, 0x2])
+    ]
+
+    def post_build(self, p, pay):
+        if self.data_len is None:
+            data_len = len(pay)
+            # p = p[:x] + chb(data_len) + p[x:]
+        return p + pay
+
+    def mysummary(self):
+        return self.sprintf("USBmon %type% %direction% [%transfer%]")
+
+class USBmonMMAPPED(USBmon):
+    name = "USBmon Header MMAPPED"
+    fields_desc = USBmon.fields_desc + [
+        # only used for Intr and ISO
+        LESignedIntField("interval", 0),
+        LESignedIntField("start_frame", 0),  # only used on ISO
+        XLEIntField("xfer_flags", 0),
+        LEIntField("ndesc", 0)
+    ]
+
+
+conf.l2types.register(DLT_USB_LINUX, USBmon)
+conf.l2types.register(DLT_USB_LINUX_MMAPPED, USBmonMMAPPED)
