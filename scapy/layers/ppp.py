@@ -68,6 +68,17 @@ class PPPoED(PPPoE):
         length = struct.unpack("!H", s[4:6])[0]
         return s[:length], s[length:]
 
+    def answers(self, other):
+        answers_matches = [
+            (0x09, 0x07),  # PADI/PADO
+            (0x0a, 0x0b),  # PADG/PADC
+            (0x19, 0x65),  # PADR/PADS
+        ]
+        if isinstance(other, PPPoED):
+            if (other.code, self.code) in answers_matches:
+                return True
+        return False
+
     def mysummary(self):
         return self.sprintf("%code%")
 
