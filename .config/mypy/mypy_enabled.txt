@@ -26,6 +26,7 @@ scapy/pton_ntop.py
 scapy/route.py
 scapy/route6.py
 scapy/sessions.py
+scapy/supersocket.py
 scapy/utils.py
 scapy/utils6.py
 
