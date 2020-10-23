@@ -17,6 +17,12 @@ import traceback
 import time
 
 from scapy.consts import WINDOWS
+from logging import LogRecord
+
+# Typing imports
+from scapy.compat import (
+    Any
+)
 
 
 class Scapy_Exception(Exception):
@@ -37,6 +43,7 @@ class ScapyFreqFilter(logging.Filter):
         self.warning_table = {}
 
     def filter(self, record):
+        # type: (LogRecord) -> bool
         from scapy.config import conf
         # Levels below INFO are not covered
         if record.levelno <= logging.INFO:
@@ -119,6 +126,7 @@ log_loading = logging.getLogger("scapy.loading")
 
 
 def warning(x, *args, **kargs):
+    # type: (str, *Any, **Any) -> None
     """
     Prints a warning during runtime.
     """
