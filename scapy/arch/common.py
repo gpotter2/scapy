@@ -85,7 +85,7 @@ def get_if_raw_hwaddr(iff,  # type: Union[NetworkInterface, str]
     :returns: the corresponding raw MAC address
     """
     if siocgifhwaddr is None:
-        from scapy.arch import SIOCGIFHWADDR
+        from scapy.arch import SIOCGIFHWADDR  # type: ignore
         siocgifhwaddr = SIOCGIFHWADDR
     return struct.unpack(  # type: ignore
         "16xh6s8x",
@@ -94,7 +94,9 @@ def get_if_raw_hwaddr(iff,  # type: Union[NetworkInterface, str]
 
 # SOCKET UTILS
 
+
 _T = TypeVar("_T")
+
 
 def _select_nonblock(sockets,  # type: List[_T]
                      remain=None  # type: Optional[int]
@@ -108,7 +110,7 @@ def _select_nonblock(sockets,  # type: List[_T]
     def _sleep_nonblock_recv(self  # type: 'scapy.supersocket.SuperSocket'
                              ):
         # type: (...) -> 'Optional[scapy.packet.Packet]'
-        res = self.nonblock_recv()
+        res = self.nonblock_recv()  # type: ignore
         if res is None:
             time.sleep(conf.recv_poll_rate)
         return res  # type: ignore

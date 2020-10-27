@@ -10,21 +10,25 @@ Linux specific functions.
 from __future__ import absolute_import
 
 
-import array
 from fcntl import ioctl
-import os
 from select import select
+import array
+import os
 import socket
 import struct
+import subprocess
 import time
 
-import subprocess
-
-from scapy.compat import raw, plain_str
-from scapy.consts import LINUX
 import scapy.utils
 import scapy.utils6
-from scapy.arch.common import get_if, compile_filter, _iff_flags
+from scapy.compat import raw, plain_str
+from scapy.consts import LINUX
+from scapy.arch.common import (
+    _iff_flags,
+    compile_filter,
+    get_if,
+    get_if_raw_hwaddr,
+)
 from scapy.config import conf
 from scapy.data import MTU, ETH_P_ALL, SOL_PACKET, SO_ATTACH_FILTER, \
     SO_TIMESTAMPNS
@@ -43,8 +47,6 @@ from scapy.supersocket import SuperSocket
 
 import scapy.modules.six as six
 from scapy.modules.six.moves import range
-
-from scapy.arch.common import get_if_raw_hwaddr  # noqa: F401
 
 # Typing imports
 from scapy.compat import (

@@ -690,7 +690,7 @@ class Conf(ConfClass):
     #: if 1, prevents any unwanted packet to go out (ARP, DNS, ...)
     stealth = "not implemented"
     #: selects the default output interface for srp() and sendp().
-    iface = Interceptor("iface", None, _iface_changer)  # type: 'scapy.interfaces.NetworkInterface'  # type: ignore
+    iface = Interceptor("iface", None, _iface_changer)  # type: 'scapy.interfaces.NetworkInterface'  # type: ignore  # noqa: E501
     layers = LayersList()
     commands = CommandsList()  # type: CommandsList
     ASN1_default_codec = None  #: Codec used by default for ASN1 objects

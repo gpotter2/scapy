@@ -16,22 +16,30 @@ import socket
 import struct
 import time
 
-from typing import List, Optional, Tuple, Union, Any, Type, cast
-
 from scapy.config import conf
 from scapy.consts import LINUX, DARWIN, WINDOWS
 from scapy.data import MTU, ETH_P_IP, SOL_PACKET, SO_TIMESTAMPNS
 from scapy.compat import raw, bytes_encode
 from scapy.error import warning, log_runtime
-from scapy.interfaces import network_name
+from scapy.interfaces import network_name, NetworkInterface
 import scapy.modules.six as six
-from scapy.packet import RawVal, Packet
+from scapy.packet import Packet
 import scapy.packet
 from scapy.plist import PacketList
 from scapy.utils import PcapReader, tcpdump
 
+# Typing imports
+from scapy.compat import (
+    Any,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 
 # Utils
+
 
 class _SuperSocket_metaclass(type):
     desc = None   # type: Optional[str]
@@ -64,7 +72,8 @@ class tpacket_auxdata(ctypes.Structure):
 
 # SuperSocket
 
-class SuperSocket(six.with_metaclass(_SuperSocket_metaclass)):
+@six.add_metaclass(_SuperSocket_metaclass)
+class SuperSocket:
     closed = 0    # type: int
     nonblocking_socket = False  # type: bool
     auxdata_available = False   # type: bool
@@ -76,10 +85,9 @@ class SuperSocket(six.with_metaclass(_SuperSocket_metaclass)):
         self.promisc = None
 
     def send(self, x):
-        # type: (Union[Packet, RawVal]) -> int
+        # type: (Packet) -> int
         sx = raw(x)
         try:
-            x = cast(Packet, x)
             x.sent_time = time.time()
         except AttributeError:
             pass
@@ -91,13 +99,13 @@ class SuperSocket(six.with_metaclass(_SuperSocket_metaclass)):
 
     if six.PY2:
         def _recv_raw(self, sock, x):
-            # type: (socket.socket, int) -> Tuple[Any, Any, Optional[int]]
+            # type: (socket.socket, int) -> Tuple[bytes, Any, Optional[float]]
             """Internal function to receive a Packet"""
             pkt, sa_ll = sock.recvfrom(x)
             return pkt, sa_ll, None
     else:
         def _recv_raw(self, sock, x):
-            # type: (socket.socket, int) -> Tuple[Any, Any, Optional[int]]
+            # type: (socket.socket, int) -> Tuple[bytes, Any, Optional[float]]
             """Internal function to receive a Packet,
             and process ancillary data.
             """
@@ -144,7 +152,7 @@ class SuperSocket(six.with_metaclass(_SuperSocket_metaclass)):
             return pkt, sa_ll, timestamp
 
     def recv_raw(self, x=MTU):
-        # type: (int) -> Tuple[Type[Packet], bytes, Optional[int]]
+        # type: (int) -> Tuple[Optional[Type[Packet]], Optional[bytes], Optional[float]]  # noqa: E501
         """Returns a tuple containing (cls, pkt_data, time)"""
         return conf.raw_layer, self.ins.recv(x), None
 
@@ -279,10 +287,10 @@ class L3RawSocket(SuperSocket):
         if sa_ll[2] == socket.PACKET_OUTGOING:
             return None
         if sa_ll[3] in conf.l2types:
-            cls = conf.l2types[sa_ll[3]]  # type: Type[Packet]
+            cls = conf.l2types.num2layer[sa_ll[3]]  # type: Type[Packet]
             lvl = 2
         elif sa_ll[1] in conf.l3types:
-            cls = conf.l3types[sa_ll[1]]
+            cls = conf.l3types.num2layer[sa_ll[1]]
             lvl = 3
         else:
             cls = conf.default_l2
@@ -290,7 +298,7 @@ class L3RawSocket(SuperSocket):
             lvl = 3
 
         try:
-            pkt = cls(data)  # type: Packet
+            pkt = cls(data)
         except KeyboardInterrupt:
             raise
         except Exception:
@@ -303,19 +311,27 @@ class L3RawSocket(SuperSocket):
 
         if pkt is not None:
             if ts is None:
-                from scapy.arch import get_last_packet_timestamp
+                from scapy.arch.linux import get_last_packet_timestamp
                 ts = get_last_packet_timestamp(self.ins)
             pkt.time = ts
         return pkt
 
     def send(self, x):
-        # type: (Union[Packet, RawVal]) -> int
+        # type: (Packet) -> int
+        if not hasattr(x, "dst"):
+            raise ValueError(
+                "Missing 'dst' attribute in the first layer to be "
+                "sent using a native L3 socket ! (make sure you passed the "
+                "ip layer)"
+            )
         try:
             sx = raw(x)
-            x = cast(Packet, x)
-            x.sent_time = time.time()
             if self.outs:
-                return self.outs.sendto(sx, (x.dst, 0))
+                x.sent_time = time.time()
+                return self.outs.sendto(
+                    sx,
+                    (x.dst, 0)
+                )
         except socket.error as msg:
             log_runtime.error(msg)
         return 0
@@ -401,9 +417,16 @@ class SSLStreamSocket(StreamSocket):
 class L2ListenTcpdump(SuperSocket):
     desc = "read packets at layer 2 using tcpdump"
 
-    def __init__(self, iface=None, promisc=None, filter=None, nofilter=False,
-                 prog=None, *arg, **karg):
-        # type: (Optional[str], Optional[bool], Optional[Any], Optional[int], Optional[str], Any, Any) -> None  # noqa: E501
+    def __init__(self,
+                 iface=None,  # type: Optional[Union[NetworkInterface, str]]
+                 promisc=False,  # type: bool
+                 filter=None,  # type: Optional[str]
+                 nofilter=False,  # type: bool
+                 prog=None,  # type: Optional[str]
+                 *arg,  # type: Any
+                 **karg  # type: Any
+                 ):
+        # type: (...) -> None
         self.outs = None
         args = ['-w', '-', '-s', '65535']
         if iface is None and (WINDOWS or DARWIN):
@@ -422,11 +445,12 @@ class L2ListenTcpdump(SuperSocket):
         if filter is not None:
             args.append(filter)
         self.tcpdump_proc = tcpdump(None, prog=prog, args=args, getproc=True)
-        self.ins = PcapReader(self.tcpdump_proc.stdout)
+        self.reader = PcapReader(self.tcpdump_proc.stdout)  # type: ignore
+        self.ins = self.reader  # type: ignore
 
     def recv(self, x=MTU):
         # type: (int) -> Optional[Packet]
-        return self.ins.recv(x)
+        return self.reader.recv(x)
 
     def close(self):
         # type: () -> None
@@ -449,8 +473,9 @@ class TunTapInterface(SuperSocket):
 
     def __init__(self, iface=None, mode_tun=None, *arg, **karg):
         # type: (Optional[str], Optional[str], Any, Any) -> None
-        self.iface = conf.iface if iface is None else iface
-        self.mode_tun = ("tun" in self.iface) if mode_tun is None else mode_tun
+        self.iface = iface or conf.iface
+        self.mode_tun = (("tun" in network_name(self.iface))
+                         if mode_tun is None else mode_tun)
         self.closed = True
         self.open()
 
@@ -459,7 +484,7 @@ class TunTapInterface(SuperSocket):
         """Open the TUN or TAP device."""
         if not self.closed:
             return
-        self.outs = self.ins = open(
+        self.fd = open(
             "/dev/net/tun" if LINUX else ("/dev/%s" % self.iface), "r+b",
             buffering=0
         )
@@ -469,14 +494,14 @@ class TunTapInterface(SuperSocket):
             # IFF_TUN = 0x0001
             # IFF_TAP = 0x0002
             # IFF_NO_PI = 0x1000
-            ioctl(self.ins, 0x400454ca, struct.pack(
+            ioctl(self.fd, 0x400454ca, struct.pack(
                 "16sH", bytes_encode(self.iface),
                 0x0001 if self.mode_tun else 0x1002,
             ))
         self.closed = False
 
     def __call__(self, *arg, **karg):
-        # type: (...) -> TunTapInterface
+        # type: (Any, Any) -> TunTapInterface
         """Needed when using an instantiated TunTapInterface object for
 conf.L2listen, conf.L2socket or conf.L3socket.
 
@@ -486,26 +511,23 @@ conf.L2listen, conf.L2socket or conf.L3socket.
     def recv(self, x=MTU):
         # type: (int) -> Packet
         if self.mode_tun:
-            data = os.read(self.ins.fileno(), x + 4)
+            data = os.read(self.fd.fileno(), x + 4)
             proto = struct.unpack('!H', data[2:4])[0]
-            basecls = conf.l3types.get(proto, conf.raw_layer)
-            basecls = cast(Type[Packet], basecls)
+            basecls = conf.l3types.num2layer.get(proto, conf.raw_layer)
             pkt = basecls(data[4:])  # type: Packet
             return pkt
-        basecls = conf.l2types.get(1, conf.raw_layer)
-        basecls = cast(Type[Packet], basecls)
-        data = os.read(self.ins.fileno(), x)
+        basecls = conf.l2types.num2layer.get(1, conf.raw_layer)
+        data = os.read(self.fd.fileno(), x)
         pkt = basecls(data)
         return pkt
 
     def send(self, x):
-        # type: (Union[RawVal, Packet]) -> int
+        # type: (Packet) -> int
         sx = raw(x)
         if self.mode_tun:
             try:
-                proto = conf.l3types[type(x)]
+                proto = conf.l3types.layer2num[type(x)]
             except KeyError:
-                x = cast(Packet, x)
                 log_runtime.warning(
                     "Cannot find layer 3 protocol value to send %s in "
                     "conf.l3types, using 0",
@@ -514,14 +536,12 @@ conf.L2listen, conf.L2socket or conf.L3socket.
                 proto = 0
             sx = struct.pack('!HH', 0, proto) + sx
         try:
-            try:
-                x = cast(Packet, x)
-                x.sent_time = time.time()
-            except AttributeError:
-                pass
-
-            if self.outs:
-                return os.write(self.outs.fileno(), sx)
+            if self.fd:
+                try:
+                    x.sent_time = time.time()
+                except AttributeError:
+                    pass
+                return os.write(self.fd.fileno(), sx)
         except socket.error:
             log_runtime.error("%s send", self.__class__.__name__, exc_info=True)  # noqa: E501
 

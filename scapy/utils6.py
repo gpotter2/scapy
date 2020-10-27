@@ -42,7 +42,7 @@ def construct_source_candidate_set(
         addr,  # type: str
         plen,  # type: int
         laddr  # type: Iterator[Tuple[str, int, str]]
-        ):
+):
     # type: (...) -> List[str]
     """
     Given all addresses assigned to a specific interface ('laddr' parameter),
