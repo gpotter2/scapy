@@ -6,6 +6,10 @@
 
 # CORE
 scapy/__init__.py
+scapy/arch/__init__.py
+scapy/arch/common.py
+scapy/arch/linux.py
+scapy/arch/unix.py
 scapy/asn1/mib.py
 scapy/base_classes.py
 scapy/compat.py
@@ -26,9 +30,8 @@ scapy/utils.py
 scapy/utils6.py
 
 # LAYERS
-
+scapy/layers/can.py
 
 # CONTRIB
 #scapy/contrib/http2.py  # needs to be fixed
 scapy/contrib/roce.py
-scapy/layers/can.py
