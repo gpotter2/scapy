@@ -82,7 +82,7 @@ class SuperSocket:
         # type: (int, int, int) -> None
         self.ins = socket.socket(family, type, proto)  # type: socket.socket
         self.outs = self.ins  # type: Optional[socket.socket]
-        self.promisc = None
+        self.promisc = False
 
     def send(self, x):
         # type: (Packet) -> int

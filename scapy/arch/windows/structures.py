@@ -11,15 +11,32 @@
 C API calls to Windows DLLs
 """
 
+import sys
+
+# https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
+assert sys.platform == 'win32'
+
 import ctypes
 import ctypes.wintypes
-from ctypes import Structure, POINTER, byref, create_string_buffer, WINFUNCTYPE
-
+from ctypes import (
+    POINTER,
+    Structure,
+    WINFUNCTYPE,
+    byref,
+    create_string_buffer,
+)
 from scapy.config import conf
 from scapy.consts import WINDOWS_XP
 
+# Typing imports
+from scapy.compat import (
+    AddressFamily,
+    Any,
+    Dict,
+    List,
+)
+
 ANY_SIZE = 65500  # FIXME quite inefficient :/
-AF_UNSPEC = 0
 NO_ERROR = 0x0
 
 CHAR = ctypes.c_char
@@ -47,6 +64,7 @@ USHORT = ctypes.c_ushort
 
 
 def _resolve_list(list_obj):
+    # type: (Any) -> List[Dict[str, Any]]
     current = list_obj
     _list = []
     while current and hasattr(current, "contents"):
@@ -56,6 +74,7 @@ def _resolve_list(list_obj):
 
 
 def _struct_to_dict(struct_obj):
+    # type: (Any) -> Dict[str, Any]
     results = {}
     for fname, ctype in struct_obj.__class__._fields_:
         val = getattr(struct_obj, fname)
@@ -119,6 +138,7 @@ QueryServiceStatus.restype = BOOL
 QueryServiceStatus.argtypes = [SC_HANDLE, POINTER(SERVICE_STATUS)]
 
 def get_service_status(service):
+    # type: (str) -> Dict[str, int]
     """Returns content of QueryServiceStatus for a service"""
     SERVICE_QUERY_STATUS = 0x0004
     schSCManager = OpenSCManagerW(
@@ -221,6 +241,7 @@ _GetIcmpStatistics = WINFUNCTYPE(ULONG, PMIB_ICMP)(
 
 
 def GetIcmpStatistics():
+    # type: () -> Dict[str, Dict[str, Dict[str, int]]]
     """Return all Windows ICMP stats from iphlpapi"""
     statistics = MIB_ICMP()
     _GetIcmpStatistics(byref(statistics))
@@ -432,7 +453,8 @@ _GetAdaptersAddresses = WINFUNCTYPE(ULONG, ULONG, ULONG,
                                         ('GetAdaptersAddresses', iphlpapi))
 
 
-def GetAdaptersAddresses(AF=AF_UNSPEC):
+def GetAdaptersAddresses(AF=AddressFamily.AF_UNSPEC):
+    # type: (int) -> List[Dict[str, Any]]
     """Return all Windows Adapters addresses from iphlpapi"""
     # We get the size first
     size = ULONG()
@@ -495,6 +517,7 @@ _GetIpForwardTable = WINFUNCTYPE(DWORD,
 
 
 def GetIpForwardTable():
+    # type: (AddressFamily) -> List[Dict[str, Any]]
     """Return all Windows routes (IPv4 only) from iphlpapi"""
     # We get the size first
     size = ULONG()
@@ -571,7 +594,8 @@ if not WINDOWS_XP:
     )
 
 
-def GetIpForwardTable2(AF=AF_UNSPEC):
+def GetIpForwardTable2(AF=AddressFamily.AF_UNSPEC):
+    # type: (AddressFamily) -> List[Dict[str, Any]]
     """Return all Windows routes (IPv4/IPv6) from iphlpapi"""
     if WINDOWS_XP:
         raise OSError("Not available on Windows XP !")

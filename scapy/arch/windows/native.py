@@ -43,6 +43,11 @@ then do custom calls through the socket using get_current_icmp_seq(). See
 the tests (windows.uts) for an example.
 """
 
+import sys
+
+# https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
+assert sys.platform == 'win32'
+
 import io
 import os
 import socket
@@ -56,8 +61,19 @@ from scapy.compat import raw
 from scapy.config import conf
 from scapy.data import MTU
 from scapy.error import Scapy_Exception, warning
+from scapy.packet import Packet
 from scapy.interfaces import resolve_iface
 from scapy.supersocket import SuperSocket
+
+# Typing imports
+from scapy.compat import (
+    Any,
+    Callable,
+    Dict,
+    Optional,
+    Tuple,
+    Type,
+)
 
 # Watch out for import loops (inet...)
 
@@ -67,8 +83,15 @@ class L3WinSocket(SuperSocket, SelectableObject):
     nonblocking_socket = True
     __slots__ = ["promisc", "cls", "ipv6", "proto"]
 
-    def __init__(self, iface=None, proto=socket.IPPROTO_IP,
-                 ttl=128, ipv6=False, promisc=True, **kwargs):
+    def __init__(self,
+                 iface=None,  # type: Optional[Any]
+                 proto=socket.IPPROTO_IP,  # type: int
+                 ttl=128,  # type: int
+                 ipv6=False,  # type: bool
+                 promisc=True,  # type: bool
+                 **kwargs  # type: Any
+                 ):
+        # type: (...) -> None
         from scapy.layers.inet import IP
         from scapy.layers.inet6 import IPv6
         for kwarg in kwargs:
@@ -144,6 +167,7 @@ class L3WinSocket(SuperSocket, SelectableObject):
             self.ins.ioctl(socket.SIO_RCVALL, socket.RCVALL_ON)
 
     def send(self, x):
+        # type: (Packet) -> None
         data = raw(x)
         if self.cls not in x:
             raise Scapy_Exception("L3WinSocket can only send IP/IPv6 packets !"
@@ -152,6 +176,7 @@ class L3WinSocket(SuperSocket, SelectableObject):
         self.outs.sendto(data, (dst_ip, 0))
 
     def nonblock_recv(self, x=MTU):
+        # type: (int) -> Optional[Packet]
         try:
             return self.recv()
         except IOError:
@@ -167,6 +192,7 @@ class L3WinSocket(SuperSocket, SelectableObject):
     # not receive any IPv6 headers using a raw socket.
 
     def recv_raw(self, x=MTU):
+        # type: (int) -> Tuple[Type[Packet], bytes, float]
         try:
             data, address = self.ins.recvfrom(x)
         except io.BlockingIOError:
@@ -195,7 +221,10 @@ class L3WinSocket(SuperSocket, SelectableObject):
         super(L3WinSocket, self).close()
 
     @staticmethod
-    def select(sockets, remain=None):
+    def select(sockets,  # type: Dict[L3WinSocket, str]
+               remain=None,  # type: float
+               ):
+        # type: (...) -> Tuple[Dict[L3WinSocket, str], Callable]
         return _select_nonblock(sockets, remain=remain)
 
 
@@ -207,6 +236,7 @@ class L3WinSocket6(L3WinSocket):
 
 
 def open_icmp_firewall(host):
+    # type: (str) -> int
     """Temporarily open the ICMP firewall. Tricks Windows into allowing
     ICMP packets for a short period of time (~ 1 minute)"""
     # We call ping with a timeout of 1ms: will return instantly
@@ -218,6 +248,7 @@ def open_icmp_firewall(host):
 
 
 def get_current_icmp_seq():
+    # type: () -> int
     """See help(scapy.arch.windows.native) for more information.
     Returns the current ICMP seq number."""
     return GetIcmpStatistics()['stats']['icmpOutStats']['dwEchos']

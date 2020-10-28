@@ -22,6 +22,16 @@ import sys
 
 from mypy.main import main as mypy_main
 
+# Check platform arg
+
+PLATFORM = None
+
+if len(sys.argv) >= 2:
+    if len(sys.argv) > 2:
+        print("Usage: mypy_check.py [platform]")
+        sys.exit(1)
+    PLATFORM = sys.argv[1]
+
 # Load files
 
 localdir = os.path.split(__file__)[0]
@@ -31,7 +41,7 @@ with io.open(os.path.join(localdir, "mypy_enabled.txt")) as fd:
 
 if not FILES:
     print("No files specified. Arborting")
-    sys.exit(0)
+    sys.exit(1)
 
 # Generate mypy arguments
 
@@ -60,7 +70,11 @@ ARGS = [
         )
     ),
     "--show-traceback",
-] + [os.path.abspath(f) for f in FILES]
+] + ([
+    "--platform=" + PLATFORM
+] if PLATFORM else []) + [
+    os.path.abspath(f) for f in FILES
+]
 
 # Run mypy over the files
 

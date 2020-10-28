@@ -10,13 +10,17 @@ Customizations needed to support Microsoft Windows.
 
 from __future__ import absolute_import
 from __future__ import print_function
+from glob import glob
 import os
 import platform as platform_lib
 import socket
-import subprocess as sp
-from glob import glob
 import struct
+import subprocess as sp
+import sys
 import warnings
+
+# https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
+assert sys.platform == 'win32'
 
 from scapy.arch.windows.structures import _windows_title, \
     GetAdaptersAddresses, GetIpForwardTable, GetIpForwardTable2, \
@@ -40,6 +44,16 @@ import scapy.modules.six as six
 from scapy.modules.six.moves import input, winreg
 from scapy.compat import plain_str
 from scapy.supersocket import SuperSocket
+
+# Typing imports
+from scapy.compat import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 conf.use_pcap = True
 
@@ -117,6 +131,7 @@ def _get_npcap_config(param_key):
 
 
 def _where(filename, dirs=None, env="PATH"):
+    # type: (str, Optional[Any], str) -> str
     """Find file in current dir, in deep_lookup cache or in system path"""
     if dirs is None:
         dirs = []
@@ -135,6 +150,7 @@ def _where(filename, dirs=None, env="PATH"):
 
 
 def win_find_exe(filename, installsubdir=None, env="ProgramFiles"):
+    # type: (str, Optional[Any], str) -> Optional[str]
     """Find executable in current dir, system path or in the
     given ProgramFiles subdir, and retuen its absolute path.
     """
@@ -154,9 +170,11 @@ def win_find_exe(filename, installsubdir=None, env="ProgramFiles"):
 
 class WinProgPath(ProgPath):
     def __init__(self):
+        # type: () -> None
         self._reload()
 
     def _reload(self):
+        # type: () -> None
         self.pdfreader = None
         self.psreader = None
         self.svgreader = None
@@ -231,12 +249,14 @@ if conf.prog.tcpdump and conf.use_npcap:
 
 
 def get_windows_if_list(extended=False):
+    # type: (bool) -> List[Dict[str, Any]]
     """Returns windows interfaces through GetAdaptersAddresses.
 
     params:
      - extended: include anycast and multicast IPv6 (default False)"""
     # Should work on Windows XP+
     def _get_mac(x):
+        # type: (Dict[str, Any]) -> str
         size = x["physical_address_length"]
         if size != 6:
             return ""
@@ -244,11 +264,13 @@ def get_windows_if_list(extended=False):
         return str2mac(bytes(data)[:size])
 
     def _get_ips(x):
+        # type: (Dict[str, Any]) -> List[str]
         unicast = x['first_unicast_address']
         anycast = x['first_anycast_address']
         multicast = x['first_multicast_address']
 
         def _resolve_ips(y):
+            # type: (List[Dict[str, Any]]) -> List[str]
             if not isinstance(y, list):
                 return []
             ips = []
@@ -294,6 +316,7 @@ def get_windows_if_list(extended=False):
 
 
 def _pcapname_to_guid(pcap_name):
+    # type: (str) -> str
     """Converts a Winpcap/Npcap pcpaname to its guid counterpart.
     e.g. \\DEVICE\\NPF_{...} => {...}
     """
@@ -306,6 +329,7 @@ class NetworkInterface_Win(NetworkInterface):
     """A network interface of your local host"""
 
     def __init__(self, provider, data=None):
+        # type: (WindowsInterfacesProvider, Dict[str, Any]) -> None
         self.cache_mode = None
         self.ipv4_metric = None
         self.ipv6_metric = None
@@ -314,6 +338,7 @@ class NetworkInterface_Win(NetworkInterface):
         super(NetworkInterface_Win, self).__init__(provider, data)
 
     def update(self, data):
+        # type: (Dict[str, Any]) -> None
         """Update info about a network interface according
         to a given dictionary. Such data is provided by get_windows_if_list
         """
@@ -508,10 +533,11 @@ class WindowsInterfacesProvider(InterfaceProvider):
     libpcap = True
 
     def _is_valid(self, dev):
+        # type: (NetworkInterface_Win) -> bool
         # Winpcap (and old Npcap) have no support for PCAP_IF_UP :(
         if dev.flags == 0:
             return True
-        return dev.flags & PCAP_IF_UP
+        return bool(dev.flags & PCAP_IF_UP)
 
     @classmethod
     def _pcap_check(cls):
@@ -558,6 +584,7 @@ class WindowsInterfacesProvider(InterfaceProvider):
         )
 
     def load(self, NetworkInterface_Win=NetworkInterface_Win):
+        # type: (type) -> Dict[str, NetworkInterface_Win]
         results = {}
         if not conf.cache_pcapiflist:
             # Try a restart
@@ -603,6 +630,7 @@ class WindowsInterfacesProvider(InterfaceProvider):
         return results
 
     def reload(self):
+        # type: () -> Dict[str, NetworkInterface_Win]
         """Reload interface list"""
         self.restarted_adapter = False
         if conf.use_pcap:
@@ -617,6 +645,7 @@ conf.ifaces.register_provider(WindowsInterfacesProvider)
 
 
 def get_ips(v6=False):
+    # type: (bool) -> Dict[NetworkInterface_Win, List[str]]
     """Returns all available IPs matching to interfaces, using the windows system.
     Should only be used as a WinPcapy fallback."""
     res = {}
@@ -629,6 +658,7 @@ def get_ips(v6=False):
 
 
 def get_if_raw_addr(iff):
+    # type: (Union[NetworkInterface_Win, str]) -> bytes
     """Return the raw IPv4 address of interface"""
     iff = resolve_iface(iff)
     if not iff.ip:
@@ -649,11 +679,13 @@ def get_ip_from_name(ifname, v6=False):
 
 
 def pcap_service_name():
+    # type: () -> str
     """Return the pcap adapter service's name"""
     return "npcap" if conf.use_npcap else "npf"
 
 
 def pcap_service_status():
+    # type: () -> bool
     """Returns whether the windows pcap adapter is running or not"""
     status = get_service_status(pcap_service_name())
     return status["dwCurrentState"] == 4
@@ -681,7 +713,11 @@ def pcap_service_stop(askadmin=True):
 if conf.use_pcap:
     _orig_open_pcap = libpcap.open_pcap
 
-    def open_pcap(iface, *args, **kargs):
+    def open_pcap(iface,  # type: NetworkInterface_Win
+                  *args,  # type: int
+                  **kargs  # type: Any
+                  ):
+        # type: (...) -> libpcap._PcapWrapper_libpcap
         """open_pcap: Windows routine for creating a pcap from an interface.
         This function is also responsible for detecting monitor mode.
         """
@@ -706,6 +742,7 @@ if conf.use_pcap:
 
 
 def get_if_raw_hwaddr(iface):
+    # type: (Union[NetworkInterface_Win, str]) -> Tuple[int, bytes]
     iface = resolve_iface(iface)
     return ARPHDR_ETHER, mac2str(iface.mac)
 
@@ -738,7 +775,9 @@ def _read_routes_c_v1():
     return routes
 
 
-def _read_routes_c(ipv6=False):
+def _read_routes_c(ipv6=False,  # type: bool
+                   ):
+    # type: (...) -> Union[List[Tuple[int, int, str, str, str, int]], List[Tuple[str, int, str, str, List[str], int]]]
     """Retrieve Windows routes through a GetIpForwardTable2 call.
 
     This is not available on Windows XP !"""
@@ -751,6 +790,7 @@ def _read_routes_c(ipv6=False):
     routes = []
 
     def _extract_ip(obj):
+        # type: (Dict[str, Any]) -> str
         ip = obj[sock_addr_name][sin_addr_name]
         ip = bytes(bytearray(ip['byte']))
         # Build IP
@@ -802,6 +842,7 @@ def read_routes():
 
 
 def in6_getifaddr():
+    # type: () -> List[Tuple[str, int, NetworkInterface_Win]]
     """
     Returns all IPv6 addresses found on the computer
     """
@@ -818,7 +859,15 @@ def in6_getifaddr():
     return ifaddrs
 
 
-def _append_route6(routes, dpref, dp, nh, iface, lifaddr, metric):
+def _append_route6(routes,  # type: List[Tuple[str, int, str, str, List[str], int]]
+                   dpref,  # type: str
+                   dp,  # type: int
+                   nh,  # type: str
+                   iface,  # type: str
+                   lifaddr,  # type: List[Tuple[str, int, NetworkInterface_Win]]
+                   metric,  # type: int
+                   ):
+    # type: (...) -> None
     cset = []  # candidate set (possible source addresses)
     if iface == conf.loopback_name:
         if dpref == '::':
@@ -834,6 +883,7 @@ def _append_route6(routes, dpref, dp, nh, iface, lifaddr, metric):
 
 
 def read_routes6():
+    # type: () -> List[Tuple[str, int, str, str, List[str], int]]
     routes6 = []
     if WINDOWS_XP:
         return routes6
@@ -844,7 +894,11 @@ def read_routes6():
     return routes6
 
 
-def _route_add_loopback(routes=None, ipv6=False, iflist=None):
+def _route_add_loopback(routes=None,  # type: Optional[List[Tuple[str, int, str, str, List[str], int]]]
+                        ipv6=False,  # type: bool
+                        iflist=None,  # type: Optional[List[str]]
+                        ):
+    # type: (...) -> None
     """Add a route to 127.0.0.1 and ::1 to simplify unit tests on Windows"""
     if not WINDOWS:
         warning("Calling _route_add_loopback is only valid on Windows")
