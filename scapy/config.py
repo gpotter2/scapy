@@ -48,6 +48,9 @@ from types import ModuleType
 if TYPE_CHECKING:
     # Do not import at runtime
     from scapy.packet import Packet
+    import scapy.asn1.asn1
+    import scapy.asn1.mib
+    import scapy.interfaces
 
 ############
 #  Config  #
