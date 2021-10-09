@@ -10,6 +10,7 @@ scapy/__main__.py
 scapy/all.py
 scapy/ansmachine.py
 scapy/arch/__init__.py
+scapy/automaton.py
 scapy/arch/common.py
 scapy/arch/linux.py
 scapy/arch/unix.py
