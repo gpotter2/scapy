@@ -316,7 +316,10 @@ class RadioTap(Packet):
         LEShortField('len', None),
         FlagsField('present', None, -32, _rt_present),  # noqa: E501
         # Extended presence mask
-        ConditionalField(PacketListField("Ext", [], next_cls_cb=_next_radiotap_extpm), lambda pkt: pkt.present and pkt.present.Ext),  # noqa: E501
+        ConditionalField(
+            PacketListField("Ext", [], next_cls_cb=_next_radiotap_extpm),
+            lambda pkt: pkt.present and pkt.present.Ext
+        ),
         # RadioTap fields - each starts with a ReversePadField
         # to handle padding
 
@@ -503,11 +506,13 @@ class RadioTap(Packet):
             LEShortField("hemu_flags2", 0),
             lambda pkt: pkt.present and pkt.present.HE_MU),
         ConditionalField(
-            FieldListField("RU_channel1", [], ByteField,
+            FieldListField("RU_channel1", [],
+                           ByteField("", 0),
                            count_from=lambda x: 4),
             lambda pkt: pkt.present and pkt.present.HE_MU),
         ConditionalField(
-            FieldListField("RU_channel2", [], ByteField,
+            FieldListField("RU_channel2", [],
+                           ByteField("", 0),
                            count_from=lambda x: 4),
             lambda pkt: pkt.present and pkt.present.HE_MU),
         # HE_MU_other_user
@@ -896,6 +901,15 @@ class _Dot11EltUtils(Packet):
                 # - AP shall at least enable AKM suite selector 00-0F-AC:2
                 #   and 00-0F-AC:8
                 # - AP shall set MFPC to 1 and MFPR to 0
+                # WPA3-Enterprise-only:
+                # - AP shall enable at least AKM suite selector 00-0F-AC:5
+                # - AP shall not enable AKM suite selector: 00-0F-AC:1
+                # - AP shall set MFPC and MFPR to 1
+                # - AP shall not enable WEP and TKIP
+                # WPA3-Enterprise-transition:
+                # - AP shall at least enable AKM suite selector 00-0F-AC:1
+                #   and 00-0F-AC:5
+                # - AP shall set MFPC to 1 and MFPR to 0
                 if any(x.suite == 8 for x in p.akm_suites) and \
                         all(x.suite not in [2, 6] for x in p.akm_suites) and \
                         p.mfp_capable and p.mfp_required and \
@@ -908,7 +922,22 @@ class _Dot11EltUtils(Packet):
                         p.mfp_capable and not p.mfp_required:
                     # WPA3 transition mode
                     wpa_version = "WPA3-transition"
-                # Append suite
+                elif any(x.suite == 5 for x in p.akm_suites) and \
+                        all(x.suite != 1 for x in p.akm_suites) and \
+                        p.mfp_capable and p.mfp_required and \
+                        all(x.cipher not in [1, 2, 5]
+                            for x in p.pairwise_cipher_suites):
+                    # WPA3-Enterprise
+                    wpa_version = "WPA3-Enterprise"
+                elif any(x.suite == 1 for x in p.akm_suites) and \
+                        p.mfp_capable and not p.mfp_required:
+                    # WPA3 transition mode
+                    wpa_version = "WPA3-Enterprise-transition"
+                elif all(x.suite in [0x0C, 0x0D] for x in p.akm_suites) and \
+                        p.mfp_capable and p.mfp_required and \
+                        [x.cipher for x in p.pairwise_cipher_suites] == [9]:
+                    # WPA3 only mode
+                    wpa_version = "WPA3-Enterprise-192"
                 if p.akm_suites:
                     auth = p.akm_suites[0].sprintf("%suite%")
                     crypto.add(wpa_version + "/%s" % auth)
@@ -918,7 +947,11 @@ class _Dot11EltUtils(Packet):
                 if isinstance(p, Dot11EltMicrosoftWPA):
                     if p.akm_suites:
                         auth = p.akm_suites[0].sprintf("%suite%")
-                        crypto.add("WPA/%s" % auth)
+                        if any(x.cipher in [0x04, 0x0A] \
+                                for x in p.pairwise_cipher_suites):
+                            crypto.add("WPA2/%s" % auth)
+                        else:
+                            crypto.add("WPA/%s" % auth)
                     else:
                         crypto.add("WPA")
             p = p.payload
