@@ -1212,7 +1212,10 @@ pcap = [
     bs/fin,
     bc/data
 ]
-res = sniff(offline=pcap, session=TLSSession(server_rsa_key=key))
+
+conf.tls_session_enable = True
+conf.tls_sessions.server_rsa_key = key
+res = sniff(offline=pcap)
 
 res[4].show()
 assert res[4].getlayer(TLS, 2).msg[0].data == b"To boldly go where no man has gone before...\n"

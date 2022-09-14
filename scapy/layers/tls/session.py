@@ -1163,20 +1163,6 @@ class _tls_sessions(object):
         return "\n".join(map(lambda x: fmt % x, res))
 
 
-class TLSSession(DefaultSession):
-    def __init__(self, *args, **kwargs):
-        server_rsa_key = kwargs.pop("server_rsa_key", None)
-        super(TLSSession, self).__init__(*args, **kwargs)
-        self._old_conf_status = conf.tls_session_enable
-        conf.tls_session_enable = True
-        if server_rsa_key:
-            conf.tls_sessions.server_rsa_key = server_rsa_key
-
-    def toPacketList(self):
-        conf.tls_session_enable = self._old_conf_status
-        return super(TLSSession, self).toPacketList()
-
-
 conf.tls_sessions = _tls_sessions()
 conf.tls_session_enable = False
 conf.tls_verbose = False
