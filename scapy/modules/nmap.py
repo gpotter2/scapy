@@ -20,7 +20,7 @@ from __future__ import absolute_import
 import os
 import re
 
-from scapy.data import KnowledgeBase
+from scapy.data import KnowledgeBase, KBBaseType
 from scapy.config import conf
 from scapy.arch import WINDOWS
 from scapy.error import warning
@@ -65,7 +65,6 @@ None.
             return
 
         self.base = []
-        self.base = cast(List[Tuple[str, Dict[str, Dict[str, str]]]], self.base)
         name = None
         sig = {}  # type: Dict[str,Dict[str,str]]
         for line in fdesc:
@@ -92,7 +91,7 @@ None.
         fdesc.close()
 
     def get_base(self):
-        # type: () -> List[Tuple[str, Dict]]
+        # type: () -> List[Tuple[str, KBBaseType]]
         return cast(List[Tuple[str, Dict]], super(NmapKnowledgeBase, self).get_base())
 
 
@@ -101,7 +100,7 @@ conf.nmap_kdb = cast(NmapKnowledgeBase, conf.nmap_kdb)
 
 
 def nmap_tcppacket_sig(pkt):
-    # type: (Optional[Packet]) -> Dict
+    # type: (Optional[Packet]) -> Dict[str, str]
     res = {}
     if pkt is not None:
         res["DF"] = "Y" if pkt.flags.DF else "N"
@@ -115,7 +114,7 @@ def nmap_tcppacket_sig(pkt):
 
 
 def nmap_udppacket_sig(snd, rcv):
-    # type: (SndRcvList, PacketList) -> Dict
+    # type: (SndRcvList, PacketList) -> Dict[str, str]
     res = {}
     if rcv is None:
         res["Resp"] = "N"
@@ -181,7 +180,7 @@ def nmap_sig(target, oport=80, cport=81, ucport=1):
 
 
 def nmap_probes2sig(tests):
-    # type: (Dict) -> Dict
+    # type: (Dict[str, Tuple[Packet, Packet]]) -> Dict[str, Dict[str, str]]
     tests = tests.copy()
     res = {}
     if "PU" in tests:
@@ -193,8 +192,8 @@ def nmap_probes2sig(tests):
 
 
 def nmap_search(sigs):
-    # type: (Dict) -> Tuple[Union[int, float], List]
-    guess = 0, []  # type: Tuple[Union[int, float], List]
+    # type: (Dict) -> Tuple[float, List[str]]
+    guess = 0.0, []  # type: Tuple[float, List[str]]
     conf.nmap_kdb = cast(NmapKnowledgeBase, conf.nmap_kdb)
     for osval, fprint in conf.nmap_kdb.get_base():
         score = 0.0

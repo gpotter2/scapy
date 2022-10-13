@@ -547,14 +547,14 @@ else:
 #####################
 #  knowledge bases  #
 #####################
-KBBaseType = Optional[Union[str, List[Tuple[str, Dict[str, Dict[str, str]]]]]]
+KBBaseType = Union[str, List[Tuple[str, Dict[str, Dict[str, str]]]]]
 
 
 class KnowledgeBase(object):
     def __init__(self, filename):
         # type: (Optional[Any]) -> None
         self.filename = filename
-        self.base = None  # type: KBBaseType
+        self.base = None  # type: Optional[KBBaseType]
 
     def lazy_init(self):
         # type: () -> None
@@ -571,7 +571,7 @@ class KnowledgeBase(object):
             self.base = oldbase
 
     def get_base(self):
-        # type: () -> Union[str, List[Tuple[str, Dict[str,Dict[str,str]]]]]
+        # type: () -> KBBaseType
         if self.base is None:
             self.lazy_init()
-        return cast(Union[str, List[Tuple[str, Dict[str, Dict[str, str]]]]], self.base)
+        return cast(KBBaseType, self.base)
