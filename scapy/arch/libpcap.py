@@ -323,9 +323,9 @@ if conf.use_pcap:
                     if status == PCAP_ERROR:
                         errmsg = errstr
                     elif status == PCAP_ERROR_NO_SUCH_DEVICE:
-                        errmsg = "%s: %s\n(%s)" % (iface, statusstr, errstr)
+                        errmsg = "%s: %s (%s)" % (iface, statusstr, errstr)
                     elif status == PCAP_ERROR_PERM_DENIED and errstr != "":
-                        errmsg = "%s: %s\n(%s)" % (iface, statusstr, errstr)
+                        errmsg = "%s: %s (%s)" % (iface, statusstr, errstr)
                     else:
                         errmsg = "%s: %s" % (iface, statusstr)
                     raise OSError(errmsg)
@@ -337,10 +337,20 @@ if conf.use_pcap:
                 if error:
                     raise OSError(error)
 
+            # pcap immediate mode: "In immediate mode, packets are always delivered
+            # as soon as they arrive, with no buffering"
+            # Eventually, replace with pcap_set_immediate_mode
             if WINDOWS:
-                # Winpcap/Npcap exclusive: make every packet to be instantly
-                # returned, and not buffered within Winpcap/Npcap
                 pcap_setmintocopy(self.pcap, 0)
+            else:
+                try:
+                    ioctl(
+                        self.pcap_fd.fileno(),
+                        BIOCIMMEDIATE,
+                        struct.pack("I", 1)
+                    )
+                except Exception:
+                    pass
 
             self.header = POINTER(pcap_pkthdr)()
             self.pkt_data = POINTER(c_ubyte)()
@@ -483,15 +493,6 @@ if conf.use_pcap:
                 monitor=monitor
             )
             super(L2pcapListenSocket, self).__init__(fd)
-            try:
-                if not WINDOWS:
-                    ioctl(
-                        self.pcap_fd.fileno(),
-                        BIOCIMMEDIATE,
-                        struct.pack("I", 1)
-                    )
-            except Exception:
-                pass
             if type == ETH_P_ALL:  # Do not apply any filter if Ethernet type is given  # noqa: E501
                 if conf.except_filter:
                     if filter:
@@ -529,15 +530,6 @@ if conf.use_pcap:
             fd = open_pcap(iface, MTU, self.promisc, 100,
                            monitor=monitor)
             super(L2pcapSocket, self).__init__(fd)
-            try:
-                if not WINDOWS:
-                    ioctl(
-                        self.pcap_fd.fileno(),
-                        BIOCIMMEDIATE,
-                        struct.pack("I", 1)
-                    )
-            except Exception:
-                pass
             if nofilter:
                 if type != ETH_P_ALL:
                     # PF_PACKET stuff. Need to emulate this for pcap
