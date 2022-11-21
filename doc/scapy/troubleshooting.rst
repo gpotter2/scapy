@@ -20,7 +20,7 @@ The use monitor mode varies greatly depending on the platform.
     $ sudo iwconfig IFACE mode monitor
     $ sudo ifconfig IFACE up
 
-**If you are using Npcap:** please note that Npcap ``npcap-0.9983`` broke the 802.11 util back in 2019. It has yet to be fixed (as of Npcap 0.9994) so in the meantime, use `npcap-0.9982.exe <https://nmap.org/npcap/dist/npcap-0.9982.exe>`_
+**If you are using Npcap:** please note that support for 802.11 is broken in versions ``npcap-0.9983`` (2019) to ``npcap-1.30`` (2021).
 
 .. note:: many adapters do not support monitor mode, especially on Windows, or may incorrectly report the headers. See `the Wireshark doc about this <https://wiki.wireshark.org/CaptureSetup/WLAN>`_
 
