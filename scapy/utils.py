@@ -2552,14 +2552,14 @@ def tdecode(
 def _guess_linktype_name(value):
     # type: (int) -> str
     """Guess the DLT name from its value."""
-    from scapy.libs.winpcapy import pcap_datalink_val_to_name
+    from scapy.libs.libpcap import pcap_datalink_val_to_name
     return cast(bytes, pcap_datalink_val_to_name(value)).decode()
 
 
 def _guess_linktype_value(name):
     # type: (str) -> int
     """Guess the value of a DLT name."""
-    from scapy.libs.winpcapy import pcap_datalink_name_to_val
+    from scapy.libs.libpcap import pcap_datalink_name_to_val
     val = cast(int, pcap_datalink_name_to_val(name.encode()))
     if val == -1:
         warning("Unknown linktype: %s. Using EN10MB", name)

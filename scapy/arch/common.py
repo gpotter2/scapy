@@ -63,7 +63,7 @@ def compile_filter(filter_exp,  # type: str
     :param linktype: if provided, use the linktype to compile
     """
     try:
-        from scapy.libs.winpcapy import (
+        from scapy.libs.libpcap import (
             PCAP_ERRBUF_SIZE,
             pcap_open_live,
             pcap_compile,

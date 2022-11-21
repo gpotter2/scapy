@@ -4,10 +4,13 @@
 # Copyright (C) Massimo Ciani (2009)
 # Copyright (C) Gabriel Potter
 
-# Modified for scapy's usage - To support Npcap/Monitor mode
-#
-# NOTE: the "winpcap" in the name nonwithstanding, this is for use
-# with libpcap on non-Windows platforms, as well as for WinPcap and Npcap.
+"""
+libpcap bindings
+
+Originally 'winpcapy.py' by Massimo Ciani, those bindings
+have been updated for scapy's usage - to support Npcap and
+newer libpcap features.
+"""
 
 from ctypes import *
 from ctypes.util import find_library

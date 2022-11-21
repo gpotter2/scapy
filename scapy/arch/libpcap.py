@@ -140,15 +140,15 @@ if conf.use_pcap:
     if WINDOWS:
         # Windows specific
         NPCAP_PATH = os.environ["WINDIR"] + "\\System32\\Npcap"
-        from scapy.libs.winpcapy import pcap_setmintocopy, pcap_getevent
+        from scapy.libs.libpcap import pcap_setmintocopy, pcap_getevent
     else:
-        from scapy.libs.winpcapy import pcap_get_selectable_fd
+        from scapy.libs.libpcap import pcap_get_selectable_fd
     from ctypes import POINTER, byref, create_string_buffer, c_ubyte, cast as ccast
 
     # Part of the Winpcapy integration was inspired by phaethon/scapy
     # but he destroyed the commit history, so there is no link to that
     try:
-        from scapy.libs.winpcapy import (
+        from scapy.libs.libpcap import (
             PCAP_ERRBUF_SIZE,
             PCAP_ERROR,
             PCAP_ERROR_NO_SUCH_DEVICE,
@@ -170,10 +170,10 @@ if conf.use_pcap:
             sockaddr_in6,
         )
         try:
-            from scapy.libs.winpcapy import pcap_inject
+            from scapy.libs.libpcap import pcap_inject
         except ImportError:
             # Fallback for Winpcap... (for how long?)
-            from scapy.libs.winpcapy import pcap_sendpacket as pcap_inject
+            from scapy.libs.libpcap import pcap_sendpacket as pcap_inject
 
         def load_winpcapy():
             # type: () -> None
@@ -287,7 +287,7 @@ if conf.use_pcap:
                 if WINDOWS and not conf.use_npcap:
                     raise OSError("On Windows, this feature requires NPcap !")
                 # Npcap-only functions
-                from scapy.libs.winpcapy import pcap_create, \
+                from scapy.libs.libpcap import pcap_create, \
                     pcap_set_snaplen, pcap_set_promisc, \
                     pcap_set_timeout, pcap_set_rfmon, pcap_activate, \
                     pcap_statustostr, pcap_geterr
