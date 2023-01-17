@@ -25,6 +25,7 @@ from scapy.compat import (
     List,
     Optional,
     Tuple,
+    Type,
     cast
 )
 
@@ -34,81 +35,31 @@ class DefaultSession(object):
 
     def __init__(
             self,
-            prn=None,  # type: Optional[Callable[[Packet], Any]]
-            store=False,  # type: bool
             supersession=None,  # type: Optional[DefaultSession]
             *args,  # type: Any
             **karg  # type: Any
     ):
         # type: (...) -> None
-        self.__prn = prn
-        self.__store = store
         self.lst = []  # type: List[Packet]
-        self.__count = 0
         self._supersession = supersession
-        if self._supersession:
-            self._supersession.prn = self.__prn
-            self._supersession.store = self.__store
-            self.__store = False
-            self.__prn = None
 
-    @property
-    def store(self):
-        # type: () -> bool
-        return self.__store
-
-    @store.setter
-    def store(self, val):
-        # type: (bool) -> None
-        if self._supersession:
-            self._supersession.store = val
-        else:
-            self.__store = val
-
-    @property
-    def prn(self):
-        # type: () -> Optional[Callable[[Packet], Any]]
-        return self.__prn
-
-    @prn.setter
-    def prn(self, f):
-        # type: (Optional[Any]) -> None
-        if self._supersession:
-            self._supersession.prn = f
-        else:
-            self.__prn = f
-
-    @property
-    def count(self):
-        # type: () -> int
-        if self._supersession:
-            return self._supersession.count
-        else:
-            return self.__count
-
-    def toPacketList(self):
-        # type: () -> PacketList
-        if self._supersession:
-            return PacketList(self._supersession.lst, "Sniffed")
-        else:
-            return PacketList(self.lst, "Sniffed")
-
-    def on_packet_received(self, pkt):
-        # type: (Optional[Packet]) -> None
-        """DEV: entry point. Will be called by sniff() for each
-        received packet (that passes the filters).
+    def recv(self, raw_data):
+        # type: (Tuple[Optional[Type[Packet]], Optional[bytes], Optional[float]]) -> None
         """
-        if not pkt:
+        DEV: entry point. Will be called by sniff() for each
+        received packet with the content of a socket's recv_raw()
+        """
+        cls, pkt_data, time = raw_data
+        if not pkt_data:
             return
-        if not isinstance(pkt, Packet):
-            raise TypeError("Only provide a Packet.")
-        self.__count += 1
-        if self.store:
-            self.lst.append(pkt)
-        if self.prn:
-            result = self.prn(pkt)
-            if result is not None:
-                print(result)
+        try:
+            pkt = cls(data)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            if conf.debug_dissector:
+                raise
+            pkt = conf.raw_layer(data)
 
 
 class IPSession(DefaultSession):
@@ -371,9 +322,11 @@ class TCPSession(IPSession):
             return pkt
         return None
 
-    def on_packet_received(self, pkt):
-        # type: (Optional[Packet]) -> None
-        """Hook to the Sessions API: entry point of the dissection.
+    def recv(self, pkt):
+        # type: (bytes) -> None
+        """
+        Hook to the Sessions API: entry point of the dissection.
+
         This will defragment IP if necessary, then process to
         TCP reassembly.
         """

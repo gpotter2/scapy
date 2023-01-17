@@ -996,7 +996,7 @@ class AsyncSniffer(object):
         timeout: stop sniffing after a given time (default: None).
         L2socket: use the provided L2socket (default: use conf.L2listen).
         opened_socket: provide an object (or a list of objects) ready to use
-                      .recv() on.
+                      .recv_raw() on.
         stop_filter: Python function applied to each packet to determine if
                      we have to stop the capture after this packet.
                      --Ex: stop_filter = lambda x: x.haslayer(TCP)
@@ -1042,7 +1042,7 @@ class AsyncSniffer(object):
         self.kwargs = kwargs
         self.running = False
         self.thread = None  # type: Optional[Thread]
-        self.results = None  # type: Optional[PacketList]
+        self.results = PacketList()  # type: PacketList
 
     def _setup_thread(self):
         # type: () -> None
@@ -1078,11 +1078,9 @@ class AsyncSniffer(object):
         # instantiate session
         if not isinstance(session, DefaultSession):
             session = session or DefaultSession
-            session = session(prn=prn, store=store,
-                              **session_kwargs)
+            self.session = session(**session_kwargs)
         else:
-            session.prn = prn
-            session.store = store
+            self.session = session
         # sniff_sockets follows: {socket: label}
         sniff_sockets = {}  # type: Dict[SuperSocket, _GlobInterfaceType]
         if opened_socket is not None:
@@ -1216,7 +1214,7 @@ class AsyncSniffer(object):
                     if s is close_pipe:  # type: ignore
                         break
                     try:
-                        p = s.recv()
+                        raw_pkt = s.recv_raw()
                     except EOFError:
                         # End of stream
                         try:
@@ -1239,13 +1237,19 @@ class AsyncSniffer(object):
                         if conf.debug_dissector >= 2:
                             raise
                         continue
+                    # on_packet_received handles the prn/storage
+                    p = self.session.recv(raw_pkt)
                     if p is None:
                         continue
+                    p.sniffed_on = sniff_sockets[s]
                     if lfilter and not lfilter(p):
                         continue
-                    p.sniffed_on = sniff_sockets[s]
-                    # on_packet_received handles the prn/storage
-                    session.on_packet_received(p)
+                    if prn:
+                        result = prn(p)
+                        if result is not None:
+                            print(result)
+                    if store:
+                        self.results.append(p)
                     # check
                     if (stop_filter and stop_filter(p)) or \
                             (0 < count <= session.count):
@@ -1266,7 +1270,6 @@ class AsyncSniffer(object):
                 s.close()
         elif close_pipe:
             close_pipe.close()
-        self.results = session.toPacketList()
 
     def start(self):
         # type: () -> None
