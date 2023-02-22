@@ -1,5 +1,6 @@
 *.pyc
 *.pyo
+*.lock
 dist/
 build/
 MANIFEST
@@ -10,7 +11,6 @@ coverage.xml
 .tox
 .ipynb_checkpoints
 .mypy_cache
-.vscode
 [.]venv/
 __pycache__/
 doc/scapy/_build

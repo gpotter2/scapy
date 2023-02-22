@@ -14,9 +14,13 @@ if sys.version_info[0] <= 2:
 try:
     from setuptools import setup
     from setuptools.command.sdist import sdist
-except:
+except ImportError:
     raise ImportError("setuptools is required to install scapy !")
 
+try:
+    from setuptools_rust import Binding, RustExtension
+except ImportError:
+    raise ImportError("setuptools-rust is required to install scapy !")
 
 def get_long_description():
     """
@@ -49,6 +53,12 @@ class SDist(sdist):
             f.write(__import__('scapy').VERSION)
 
 setup(
+    rust_extensions=[
+        RustExtension(
+            "scapy.core",
+            "scapy/core/Cargo.toml",
+        )
+    ],
     cmdclass={'sdist': SDist},
     long_description=get_long_description(),
     long_description_content_type='text/markdown',
