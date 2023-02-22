@@ -1,0 +1,16 @@
+[package]
+name = "scapy-core"
+version = "0.1.0"
+authors = ["The secdev/scapy developers"]
+edition = "2021"
+
+[features]
+extension-module = ["pyo3/extension-module"]
+default = ["extension-module"]
+
+[dependencies]
+pyo3 = { version = "0.18.1" }
+
+[lib]
+name = "core"
+crate-type = ["cdylib"]

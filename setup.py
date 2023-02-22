@@ -15,9 +15,13 @@ try:
     from setuptools import setup
     from setuptools.command.sdist import sdist
     from setuptools.command.build_py import build_py
-except:
+except ImportError:
     raise ImportError("setuptools is required to install scapy !")
 
+try:
+    from setuptools_rust import Binding, RustExtension
+except ImportError:
+    raise ImportError("setuptools-rust is required to install scapy !")
 
 def get_long_description():
     """
@@ -84,6 +88,12 @@ class BuildPy(build_py):
 setup(
     cmdclass={'sdist': SDist, 'build_py': BuildPy},
     data_files=[('share/man/man1', ["doc/scapy.1"])],
+    rust_extensions=[
+        RustExtension(
+            "scapy.core",
+            "scapy/core/Cargo.toml",
+        )
+    ],
     long_description=get_long_description(),
     long_description_content_type='text/markdown',
 )
