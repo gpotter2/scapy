@@ -1,8 +1,10 @@
 *.pyc
 *.pyo
 *.lock
+*.so
 dist/
 build/
+scapy/core/target
 MANIFEST
 *.egg-info/
 test/*.html
