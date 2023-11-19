@@ -10,6 +10,7 @@ default = ["extension-module"]
 
 [dependencies]
 pyo3 = { version = "0.18.1" }
+num-traits = "0.2"
 
 [lib]
 name = "core"
