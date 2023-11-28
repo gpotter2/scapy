@@ -1,47 +1,46 @@
 use pyo3::prelude::*;
 
-use std::mem::size_of;
-
-use num_traits::FromBytes;
-use num_traits::ops::bytes::NumBytes;
-use num_traits::int::PrimInt;
-
 use crate::packet;
+use crate::utils::r#struct::*;
 
-pub trait Field<I> {
+pub trait FieldTrait<I, M> {
     // Box<[u8]> is used when dissecting
     // Vec<u8> is used when building
-    fn new(&mut self, name: &str, default: I);
-    fn m2i(&self, pkt: packet::Packet, x: Box<[u8]>) -> Result<I, &str>;
-    // fn i2m(&self, pkt: packet::Packet, x: I) -> Result<Vec<u8>, &str>;
+    fn new(&mut self, name: &'static str, default: I);
+    fn m2i(&self, pkt: packet::Packet, x: M) -> Result<I, &str>;
+    fn i2m(&self, pkt: packet::Packet, x: Option<I>) -> Result<M, &str>;
     // fn addfield(&self, pkt: packet::Packet, s: Vec<u8>, val: I) -> Result<Vec<u8>, &str>;
     // fn getfield(&self, pkt: packet::Packet, x: Box<[u8]>) -> Result<(I, Box<[u8]>), &str>;
 }
 
-trait SimpleFieldType: PrimInt + FromBytes {}
-
-struct SimpleField<I> {
+struct Field {
     name: &'static str,
-    default: I,
-    sz: usize,
+    default: StructValue,
+    sz: u8,
 }
 
-impl<I> Field<I> for SimpleField<I> where I: SimpleFieldType {
-    fn new(&mut self, name: &str, default: I) {
+impl FieldTrait<usize, usize> for Field {
+    fn new(&mut self, name: &'static str, default: usize, fmt: &str) {
         self.name = name;
         self.default = default;
+        self.sz = calcsize(fmt);
+    }
+    fn m2i(&self, _: packet::Packet, x: I) -> Result<I, &str> {
+        Ok(x)
+    }
+    fn i2m(&self, _: packet::Packet, x: Option<I>) -> Result<I, &str> {
+        if let Some(val) = x {
+            Ok(val)
+        } else {
+            Ok(I::zero())
+        }
     }
 }
 
-impl SimpleField<u8> {
-    
-}
-
-pub struct ByteField SimpleField<u8> {};
-
+type ByteField = Field<u8>;
 
 #[pymodule]
 pub fn fields(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    m.add_class::<ByteField>()?;
+    //m.add_class::<ByteField>()?;
     Ok(())
 }
