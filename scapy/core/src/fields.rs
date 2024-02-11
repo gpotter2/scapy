@@ -1,46 +1,80 @@
 use pyo3::prelude::*;
 
 use crate::packet;
-use crate::utils::r#struct::*;
 
-pub trait FieldTrait<I, M> {
+pub trait FieldTrait {
+    type I;  // Internal
+    type M;  // Machine
+
     // Box<[u8]> is used when dissecting
     // Vec<u8> is used when building
-    fn new(&mut self, name: &'static str, default: I);
-    fn m2i(&self, pkt: packet::Packet, x: M) -> Result<I, &str>;
-    fn i2m(&self, pkt: packet::Packet, x: Option<I>) -> Result<M, &str>;
-    // fn addfield(&self, pkt: packet::Packet, s: Vec<u8>, val: I) -> Result<Vec<u8>, &str>;
-    // fn getfield(&self, pkt: packet::Packet, x: Box<[u8]>) -> Result<(I, Box<[u8]>), &str>;
+    fn new(name: String, default: Self::I) -> Self;
+    fn m2i(&self, pkt: &mut packet::Packet, x: Self::M) -> Result<Self::I, PyErr>;
+    fn i2m(&self, pkt: &mut packet::Packet, x: Option<Self::I>) -> Result<Self::M, PyErr>;
+    // fn addfield(&self, pkt: packet::Packet, s: Vec<u8>, val: I) -> Result<Vec<u8>, PyErr>;
+    // fn getfield(&self, pkt: packet::Packet, x: Box<[u8]>) -> Result<(I, Box<[u8]>), PyErr>;
 }
 
-struct Field {
-    name: &'static str,
-    default: StructValue,
-    sz: u8,
-}
 
-impl FieldTrait<usize, usize> for Field {
-    fn new(&mut self, name: &'static str, default: usize, fmt: &str) {
-        self.name = name;
-        self.default = default;
-        self.sz = calcsize(fmt);
-    }
-    fn m2i(&self, _: packet::Packet, x: I) -> Result<I, &str> {
-        Ok(x)
-    }
-    fn i2m(&self, _: packet::Packet, x: Option<I>) -> Result<I, &str> {
-        if let Some(val) = x {
-            Ok(val)
-        } else {
-            Ok(I::zero())
+macro_rules! Field {
+    ( $pyname:ident, $i:ty, $m:ty ) => {
+        #[pyclass]
+        struct $pyname {
+            name: String,
+            default: $i,
+            sz: usize,
         }
-    }
+
+        impl FieldTrait for $pyname {
+            type I = $i;
+            type M = $m;
+
+            fn new(name: String, default: Self::I) -> Self {
+                $pyname {
+                    name: name,
+                    default: default,
+                    sz: std::mem::size_of::<Self::I>()
+                }
+            }
+            fn m2i(&self, _: &mut packet::Packet, x: Self::M) -> Result<Self::I, PyErr> {
+                Ok(x)
+            }
+            fn i2m(&self, _: &mut packet::Packet, x: Option<Self::I>) -> Result<Self::M, PyErr> {
+                if let Some(val) = x {
+                    Ok(val)
+                } else {
+                    Ok(0)
+                }
+            }
+        }
+
+        // https://pyo3.rs/v0.20.2/trait_bounds#implementation-of-the-trait-bounds-for-the-python-class
+        #[pymethods]
+        impl $pyname {
+            #[new]
+            pub fn new(name: String, default: $i) -> Self {
+                FieldTrait::new(name, default)
+            }
+            fn m2i(&self, pkt: &mut packet::Packet, x: $m) -> Result<$i, PyErr> {
+                FieldTrait::m2i(self, pkt, x)
+            }
+            fn i2m(&self, pkt: &mut packet::Packet, x: Option<$i>) -> Result<$m, PyErr> {
+                FieldTrait::i2m(self, pkt, x)
+            }
+        }
+    };
 }
 
-type ByteField = Field<u8>;
+Field![ByteField, u8, u8];
+Field![ShortField, u16, u16];
+Field![IntField, u32, u32];
+Field![LongField, u64, u64];
 
 #[pymodule]
 pub fn fields(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    //m.add_class::<ByteField>()?;
+    m.add_class::<ByteField>()?;
+    m.add_class::<ShortField>()?;
+    m.add_class::<IntField>()?;
+    m.add_class::<LongField>()?;
     Ok(())
 }
