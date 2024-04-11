@@ -331,6 +331,12 @@ def load_protocols(filename, _fallback=None, _integer_base=10,
 
 
 class EtherDA(DADict[int, str]):
+    def __init__(self):
+        # type: () -> None
+        super(EtherDA, self).__init__(_name="ethertypes")
+        from scapy.libs.ethertypes import DATA
+        self.d.update(DATA)
+
     # Backward compatibility: accept
     # ETHER_TYPES["MY_GREAT_TYPE"] = 12
     def __setitem__(self, attr, val):
@@ -352,18 +358,6 @@ class EtherDA(DADict[int, str]):
             )
             return super(EtherDA, self).__getattr__(attr)
         return super(EtherDA, self).__getitem__(attr)
-
-
-def load_ethertypes(filename):
-    # type: (Optional[str]) -> EtherDA
-    """"Parse /etc/ethertypes and return values as a dictionary.
-    If unavailable, use the copy bundled with Scapy."""
-    from scapy.libs.ethertypes import DATA
-    prot = load_protocols(filename or "Scapy's backup ETHER_TYPES",
-                          _fallback=DATA,
-                          _integer_base=16,
-                          _cls=EtherDA)
-    return cast(EtherDA, prot)
 
 
 def load_services(filename):
@@ -416,6 +410,12 @@ def load_services(filename):
 
 
 class ManufDA(DADict[str, Tuple[str, str]]):
+    def __init__(self):
+        # type: () -> None
+        super(ManufDA, self).__init__(_name="manufdb")
+        from scapy.libs.manuf import DATA
+        self.d.update(DATA)
+
     def ident(self, v):
         # type: (Any) -> str
         return fixname(v[0] if isinstance(v, tuple) else v)
@@ -472,33 +472,6 @@ class ManufDA(DADict[str, Tuple[str, str]]):
         ] + super(ManufDA, self).__dir__()
 
 
-def load_manuf(filename):
-    # type: (str) -> ManufDA
-    """
-    Loads manuf file from Wireshark.
-
-    :param filename: the file to load the manuf file from
-    :returns: a ManufDA filled object
-    """
-    manufdb = ManufDA(_name=filename)
-    with open(filename, "rb") as fdesc:
-        for line in fdesc:
-            try:
-                line = line.strip()
-                if not line or line.startswith(b"#"):
-                    continue
-                parts = line.split(None, 2)
-                ouib, shrt = parts[:2]
-                lng = parts[2].lstrip(b"#").strip() if len(parts) > 2 else b""
-                lng = lng or shrt
-                oui = plain_str(ouib)
-                manufdb[oui] = plain_str(shrt), plain_str(lng)
-            except Exception:
-                log_loading.warning("Couldn't parse one line from [%s] [%r]",
-                                    filename, line, exc_info=True)
-    return manufdb
-
-
 def select_path(directories, filename):
     # type: (List[str], str) -> Optional[str]
     """Find filename among several directories"""
@@ -524,24 +497,15 @@ if WINDOWS:
         "etc",
         "services",
     ))
-    # Default values, will be updated by arch.windows
-    ETHER_TYPES = load_ethertypes(None)
-    MANUFDB = ManufDA()
 else:
     IP_PROTOS = load_protocols("/etc/protocols")
-    ETHER_TYPES = load_ethertypes("/etc/ethertypes")
     TCP_SERVICES, UDP_SERVICES, SCTP_SERVICES = load_services("/etc/services")
-    MANUFDB = ManufDA()
-    manuf_path = select_path(
-        ['/usr', '/usr/local', '/opt', '/opt/wireshark',
-         '/Applications/Wireshark.app/Contents/Resources'],
-        "share/wireshark/manuf"
-    )
-    if manuf_path:
-        try:
-            MANUFDB = load_manuf(manuf_path)
-        except (IOError, OSError):
-            log_loading.warning("Cannot read wireshark manuf database")
+
+
+# Load MANUFDB
+MANUFDB = ManufDA()
+# Load ETHER_TYPES
+ETHER_TYPES = EtherDA()
 
 
 #####################

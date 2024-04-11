@@ -14,45 +14,37 @@ but up-to-date.
 import re
 import urllib.request
 
+from scapy.error import log_loading
+
 URL = "https://raw.githubusercontent.com/openbsd/src/master/sys/net/ethertypes.h"  # noqa: E501
 
 with urllib.request.urlopen(URL) as stream:
     DATA = stream.read()
 
-reg = br".*ETHERTYPE_([^\s]+)\s.0x([0-9A-Fa-f]+).*\/\*(.*)\*\/"
-COMPILED = b"""#
-# Ethernet frame types
-#       This file describes some of the various Ethernet
-#       protocol types that are used on Ethernet networks.
-#
-# This list could be found on:
-#         http://www.iana.org/assignments/ethernet-numbers
-#         http://www.iana.org/assignments/ieee-802-numbers
-#
-# <name>    <hexnumber> <alias1>...<alias35> #Comment
-#
-"""
+reg = r".*ETHERTYPE_([^\s]+)\s.0x([0-9A-Fa-f]+).*\/\*(.*)\*\/"
+COMPILED = ""
 ALIASES = {
     b"IP": b"IPv4",
     b"IPV6": b"IPv6"
 }
 
 for line in DATA.split(b"\n"):
-    match = re.match(reg, line)
-    if match:
-        name = match.group(1)
-        name = ALIASES.get(name, name).ljust(16)
-        number = match.group(2).upper()
-        comment = match.group(3).strip()
-        compiled_line = (b"%b%b" + b" " * 25 + b"# %b\n") % (
-            name, number, comment
-        )
-        COMPILED += compiled_line
+    try:
+        match = re.match(reg, line.decode("utf_8", errors="backslashreplace"))
+        if match:
+            name = match.group(1)
+            name = ALIASES.get(name, name)
+            number = match.group(2)
+            comment = match.group(3).strip()
+            COMPILED += "    0x%s: (%s, %s),\n" % (number, repr(name), repr(comment))
+    except Exception:
+        log_loading.warning("Couldn't parse one line from [%s] [%r]",
+                            filename, line, exc_info=True)
 
 with open("../libs/ethertypes.py", "rb") as inp:
     data = inp.read()
 
 with open("../libs/ethertypes.py", "wb") as out:
-    ini, sep, _ = data.partition(b"DATA = b\"\"\"")
-    COMPILED = ini + sep + b"\n" + COMPILED + b"\"\"\"\n"
+    ini, sep, _ = data.partition(b"DATA = {")
+    COMPILED = ini + sep + b"\n" + COMPILED.encode() + b"}\n"
     print("Written: %s" % out.write(COMPILED))
