@@ -1,0 +1,12 @@
+task:
+  name: "Cirrus tests"
+  container:
+    image: python:slim
+  
+  matrix:
+    - name: FreeBSD
+      freebsd_instance:
+        image_family: freebsd-14-0
+
+  install_script: ./.config/ci/install.sh
+  test_script: ./.config/ci/test.sh
