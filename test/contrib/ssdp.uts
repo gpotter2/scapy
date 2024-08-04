@@ -1,0 +1,17 @@
+# SSDP Related regression tests
+# 
+# Type the following command to launch start the tests:
+# $ test/run_tests -P "load_contrib('ssdp')" -t test/contrib/ssdp.uts
+
++ SSDP tests
+
+= Parse SSDP search request
+
+req = SSDP(b'M-SEARCH * HTTP/1.1\r\nHost: 239.255.255.250:1900\r\nST: urn:schemas-wifialliance-org:device:WFADevice:1\r\nMan: "ssdp:discover"\r\nMX: 3\r\n\r\n')
+
+assert req.Method == b"M-SEARCH"
+assert req.Request_Uri == b"*"
+assert req.Host == b"239.255.255.250:1900"
+assert req.Man == b'"ssdp:discover"'
+assert req.ST == b"urn:schemas-wifialliance-org:device:WFADevice:1"
+assert req.Version == b"HTTP/1.1"
