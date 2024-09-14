@@ -9,8 +9,7 @@ extension-module = ["pyo3/extension-module"]
 default = ["extension-module"]
 
 [dependencies]
-pyo3 = { version = "0.18.1" }
-num-traits = "0.2"
+pyo3 = { version = "0.22.2" }
 
 [lib]
 name = "core"
