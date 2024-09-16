@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::wrap_pymodule;
 
-mod int;
+mod types;
 
 pub mod fields;
 pub mod packet;
