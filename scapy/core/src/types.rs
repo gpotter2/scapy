@@ -1,38 +1,4 @@
-/*
- * Machine type.
- * This implements the conversion between bytes and the internal values.
- */
 use pyo3::prelude::*;
-
-pub trait MachineType {
-    type U8Array;
-    fn from_le_bytes(bytes: Self::U8Array) -> Self;
-    fn from_be_bytes(bytes: Self::U8Array) -> Self;
-    fn to_le_bytes(x: Self) -> Self::U8Array;
-    fn to_be_bytes(x: Self) -> Self::U8Array;
-}
-
-macro_rules! impl_Ints (( $($int:ident),* ) => {
-    $(
-        impl MachineType for $int {
-            type U8Array = [u8; std::mem::size_of::<Self>()];
-            fn from_le_bytes(bytes: Self::U8Array) -> Self {
-                Self::from_le_bytes(bytes)
-            }
-            fn from_be_bytes(bytes: Self::U8Array) -> Self {
-                Self::from_be_bytes(bytes)
-            }
-            fn to_le_bytes(x: Self) -> Self::U8Array {
-                x.to_le_bytes()
-            }
-            fn to_be_bytes(x: Self) -> Self::U8Array {
-                x.to_be_bytes()
-            }
-        }
-    )*
-});
-
-impl_Ints!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128);
 
 /*
  * Internal type.
@@ -50,4 +16,77 @@ pub enum InternalType {
     SignedInt(i32),
     Long(u64),
     SignedLong(i64),
+    LongLong(u128),
+    SignedLongLong(i128),
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub enum MachineType {
+    Byte(u8),
+    SignedByte(i8),
+    Short(u16),
+    SignedShort(i16),
+    Int(u32),
+    SignedInt(i32),
+    Long(u64),
+    SignedLong(i64),
+    LongLong(u128),
+    SignedLongLong(i128),
+}
+
+impl MachineType {
+    pub fn as_internal(&self) -> InternalType {
+        match self {
+            MachineType::Byte(x) => InternalType::Byte(*x),
+            MachineType::SignedByte(x) => InternalType::SignedByte(*x),
+            MachineType::Short(x) => InternalType::Short(*x),
+            MachineType::SignedShort(x) => InternalType::SignedShort(*x),
+            MachineType::Int(x) => InternalType::Int(*x),
+            MachineType::SignedInt(x) => InternalType::SignedInt(*x),
+            MachineType::Long(x) => InternalType::Long(*x),
+            MachineType::SignedLong(x) => InternalType::SignedLong(*x),
+            MachineType::LongLong(x) => InternalType::LongLong(*x),
+            MachineType::SignedLongLong(x) => InternalType::SignedLongLong(*x),
+        }
+    }
+}
+
+impl InternalType {
+    pub fn as_machine(&self) -> MachineType {
+        match self {
+            InternalType::Byte(x) => MachineType::Byte(*x),
+            InternalType::SignedByte(x) => MachineType::SignedByte(*x),
+            InternalType::Short(x) => MachineType::Short(*x),
+            InternalType::SignedShort(x) => MachineType::SignedShort(*x),
+            InternalType::Int(x) => MachineType::Int(*x),
+            InternalType::SignedInt(x) => MachineType::SignedInt(*x),
+            InternalType::Long(x) => MachineType::Long(*x),
+            InternalType::SignedLong(x) => MachineType::SignedLong(*x),
+            InternalType::LongLong(x) => MachineType::LongLong(*x),
+            InternalType::SignedLongLong(x) => MachineType::SignedLongLong(*x),
+        }
+    }
+    pub fn to_object(&self, py: Python<'_>) -> Py<PyAny> {
+        match self {
+            InternalType::Byte(x) => x.to_object(py),
+            InternalType::SignedByte(x) => x.to_object(py),
+            InternalType::Short(x) => x.to_object(py),
+            InternalType::SignedShort(x) => x.to_object(py),
+            InternalType::Int(x) => x.to_object(py),
+            InternalType::SignedInt(x) => x.to_object(py),
+            InternalType::Long(x) => x.to_object(py),
+            InternalType::SignedLong(x) => x.to_object(py),
+            InternalType::LongLong(x) => x.to_object(py),
+            InternalType::SignedLongLong(x) => x.to_object(py),
+        }
+    }
+}
+
+// Export
+
+#[pymodule]
+pub fn types(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<InternalType>()?;
+    Ok(())
 }

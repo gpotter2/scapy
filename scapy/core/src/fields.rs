@@ -1,95 +1,88 @@
 use pyo3::prelude::*;
+use pyo3::exceptions::PyTypeError;
 
 use crate::packet;
 use crate::types;
 
 /*
- * FieldTrait is the trait that must be implemented by all of Scapy's fields.
+ * FieldTrait is the trait that defines the behavior of Fields.
  */
-pub trait FieldTrait {
-    type I; // Internal
-    type M: types::MachineType; // Machine
 
+pub trait FieldTrait {
     // &[u8] is used when dissecting
     // Vec<u8> is used when building
-    fn new(name: String, default: Self::I) -> Self
-    where
-        Self: Sized;
-    fn m2i(&self, pkt: &packet::Packet, x: Self::M) -> Result<Self::I, PyErr>;
-    fn i2m(&self, pkt: &packet::Packet, x: Option<Self::I>) -> Result<Self::M, PyErr>;
+    fn init(&mut self);
+    fn m2i(&self, pkt: &packet::Packet, x: types::MachineType) -> Result<types::InternalType, PyErr>;
+    fn i2m(&self, pkt: &packet::Packet, x: Option<types::InternalType>) -> Result<types::MachineType, PyErr>;
     fn addfield(
         &self,
         pkt: &packet::Packet,
         s: Vec<u8>,
-        val: Option<Self::I>,
+        val: Option<types::InternalType>,
     ) -> Result<Vec<u8>, PyErr>;
     fn getfield<'a>(&self, pkt: &packet::Packet, x: &'a [u8])
-        -> Result<(Self::I, &'a [u8]), PyErr>;
+        -> Result<(types::InternalType, &'a [u8]), PyErr>;
 }
 
+// Generic Field type that selects a sub-type
+
 macro_rules! Field {
-    /*
-     * This Macro is used to implement the default Fields
-     */
-    ( $pyname:ident, $i:ty, $m:ty, $leendian:expr ) => {
+    ($pyname:ident, $i:ident, $m:ty, $leendian:expr) => {
         #[pyclass]
         #[derive(Clone)]
         pub struct $pyname {
-            #[pyo3(get)]
-            name: String,
-            #[pyo3(get)]
-            default: $i,
-            #[pyo3(get)]
             sz: usize,
         }
 
+        // Define trait
         impl FieldTrait for $pyname {
             // https://doc.rust-lang.org/book/ch19-03-advanced-traits.html#specifying-placeholder-types-in-trait-definitions-with-associated-types
-            type I = $i;
-            type M = $m;
-
-            fn new(name: String, default: Self::I) -> Self {
-                $pyname {
-                    name: name,
-                    default: default,
-                    sz: std::mem::size_of::<Self::M>(),
-                }
+            fn init(&mut self) {
+                self.sz = std::mem::size_of::<$m>();
             }
-            fn m2i(&self, _: &packet::Packet, x: Self::M) -> Result<Self::I, PyErr> {
-                Ok(x)
+            fn m2i(&self, _: &packet::Packet, x: types::MachineType) -> Result<types::InternalType, PyErr> {
+                Ok(x.as_internal())
             }
-            fn i2m(&self, _: &packet::Packet, x: Option<Self::I>) -> Result<Self::M, PyErr> {
+            fn i2m(&self, _: &packet::Packet, x: Option<types::InternalType>) -> Result<types::MachineType, PyErr> {
                 if let Some(val) = x {
-                    Ok(val)
+                    Ok(val.as_machine())
                 } else {
-                    Ok(0)
+                    Ok(types::InternalType::$i(0).as_machine())
                 }
             }
             fn addfield(
                 &self,
                 pkt: &packet::Packet,
                 mut s: Vec<u8>,
-                val: Option<Self::I>,
+                val: Option<types::InternalType>,
             ) -> Result<Vec<u8>, PyErr> {
-                if $leendian {
-                    s.extend_from_slice(&self.i2m(pkt, val)?.to_le_bytes());
-                } else {
-                    s.extend_from_slice(&self.i2m(pkt, val)?.to_be_bytes());
+                let mval = self.i2m(pkt, val)?;
+                match mval {
+                    types::MachineType::$i(x) => {
+                        if $leendian {
+                            s.extend_from_slice(&x.to_le_bytes());
+                        } else {
+                            s.extend_from_slice(&x.to_be_bytes());
+                        };
+                        return Ok(s)
+                    },
+                    _ => {
+                        Err(PyTypeError::new_err("Bad type !"))
+                    }
                 }
-                Ok(s)
             }
             fn getfield<'a>(
                 &self,
                 pkt: &packet::Packet,
                 x: &'a [u8],
-            ) -> Result<(Self::I, &'a [u8]), PyErr> {
+            ) -> Result<(types::InternalType, &'a [u8]), PyErr> {
                 Ok((
                     self.m2i(
                         pkt,
                         if $leendian {
-                            Self::M::from_le_bytes(x[..self.sz].try_into()?)
+                            types::MachineType::$i(<$m>::from_le_bytes(x[..self.sz].try_into()?))
                         } else {
-                            Self::M::from_be_bytes(x[..self.sz].try_into()?)
+                            types::MachineType::$i(<$m>::from_be_bytes(x[..self.sz].try_into()?))
                         },
                     )?,
                     &x[self.sz..],
@@ -97,59 +90,69 @@ macro_rules! Field {
             }
         }
 
+        // Define python aliases
         // https://pyo3.rs/v0.20.2/trait_bounds#implementation-of-the-trait-bounds-for-the-python-class
         #[pymethods]
         impl $pyname {
-            #[new]
-            pub fn new(name: String, default: $i) -> Self {
-                FieldTrait::new(name, default)
+            #[staticmethod]
+            pub fn new(name: String, default: types::InternalType) -> Field {
+                let mut x = $pyname { sz: 0 };
+                x.init();
+                Field {
+                    name: name,
+                    default: default,
+                    sz: x.sz,
+                    fieldtype: FieldType::$pyname(
+                        x
+                    )
+                }
             }
-            fn m2i(&self, pkt: &packet::Packet, x: $m) -> Result<$i, PyErr> {
+            pub fn m2i(&self, pkt: &packet::Packet, x: types::MachineType) -> Result<types::InternalType, PyErr> {
                 FieldTrait::m2i(self, pkt, x)
             }
             #[pyo3(signature=(pkt, x=None))]
-            fn i2m(&self, pkt: &packet::Packet, x: Option<$i>) -> Result<$m, PyErr> {
+            pub fn i2m(&self, pkt: &packet::Packet, x: Option<types::InternalType>) -> Result<types::MachineType, PyErr> {
                 FieldTrait::i2m(self, pkt, x)
             }
             #[pyo3(signature=(pkt, s, val=None))]
-            fn addfield(
+            pub fn addfield(
                 &self,
                 pkt: &packet::Packet,
                 s: Vec<u8>,
-                val: Option<$i>,
+                val: Option<types::InternalType>,
             ) -> Result<Vec<u8>, PyErr> {
                 FieldTrait::addfield(self, pkt, s, val)
             }
-            fn getfield<'a>(
+            pub fn getfield<'a>(
                 &self,
                 pkt: &packet::Packet,
                 x: &'a [u8],
-            ) -> Result<($i, &'a [u8]), PyErr> {
+            ) -> Result<(types::InternalType, &'a [u8]), PyErr> {
                 FieldTrait::getfield(self, pkt, x)
             }
         }
     };
 }
 
-Field![ByteField, u8, u8, false];
-Field![ShortField, u16, u16, false];
-Field![IntField, u32, u32, false];
-Field![LongField, u64, u64, false];
+Field![ByteField, Byte, u8, false];
+Field![ShortField, Short, u16, false];
+Field![IntField, Int, u32, false];
+Field![LongField, Long, u64, false];
+Field![LEShortField, Short, u16, true];
+Field![LEIntField, Int, u32, true];
+Field![LELongField, Long, u64, true];
+Field![SignedByteField, SignedByte, i8, false];
+Field![SignedShortField, SignedShort, i16, false];
+Field![SignedIntField, SignedInt, i32, false];
+Field![SignedLongField, SignedLong, i64, false];
+Field![LESignedShortField, SignedShort, i16, true];
+Field![LESignedIntField, SignedInt, i32, true];
+Field![LESignedLongField, SignedLong, i64, true];
 
-Field![LEShortField, u16, u16, true];
-Field![LEIntField, u32, u32, true];
-Field![LELongField, u64, u64, true];
 
-Field![SignedByteField, i8, i8, false];
-Field![SignedShortField, i16, i16, false];
-Field![SignedIntField, i32, i32, false];
-Field![SignedLongField, i64, i64, false];
+// Generic
 
-Field![LESignedShortField, i16, i16, true];
-Field![LESignedIntField, i32, i32, true];
-Field![LESignedLongField, i64, i64, true];
-
-#[derive(FromPyObject, Clone)]
+#[derive(Clone)]
 pub enum FieldType {
     ByteField(ByteField),
     ShortField(ShortField),
@@ -166,6 +169,38 @@ pub enum FieldType {
     LESignedIntField(LESignedIntField),
     LESignedLongField(LESignedLongField),
 }
+
+impl FieldType {
+    pub fn as_trait(&self) -> Box<&dyn FieldTrait> {
+        match self {
+            FieldType::ByteField(x) => Box::new(x),
+            FieldType::ShortField(x) => Box::new(x),
+            FieldType::IntField(x) => Box::new(x),
+            FieldType::LongField(x) => Box::new(x),
+            FieldType::LEShortField(x) => Box::new(x),
+            FieldType::LEIntField(x) => Box::new(x),
+            FieldType::LELongField(x) => Box::new(x),
+            FieldType::SignedByteField(x) => Box::new(x),
+            FieldType::SignedShortField(x) => Box::new(x),
+            FieldType::SignedIntField(x) => Box::new(x),
+            FieldType::SignedLongField(x) => Box::new(x),
+            FieldType::LESignedShortField(x) => Box::new(x),
+            FieldType::LESignedIntField(x) => Box::new(x),
+            FieldType::LESignedLongField(x) => Box::new(x),
+        }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct Field {
+    pub name: String,
+    pub default: types::InternalType,
+    pub sz: usize,
+    pub fieldtype: FieldType,
+}
+
+// Export
 
 #[pymodule]
 pub fn fields(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -185,3 +220,4 @@ pub fn fields(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<LESignedLongField>()?;
     Ok(())
 }
+

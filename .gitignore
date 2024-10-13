@@ -4,7 +4,7 @@
 *.so
 dist/
 build/
-scapy/core/target
+target/
 MANIFEST
 *.egg-info/
 test/*.html
