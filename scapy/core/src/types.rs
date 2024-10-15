@@ -1,4 +1,6 @@
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use std::convert::TryInto;
 
 /*
  * Internal type.
@@ -18,6 +20,8 @@ pub enum InternalType {
     SignedLong(i64),
     LongLong(u128),
     SignedLongLong(i128),
+    String(String),
+    Bytes(Vec<u8>),
 }
 
 #[pyclass]
@@ -33,6 +37,7 @@ pub enum MachineType {
     SignedLong(i64),
     LongLong(u128),
     SignedLongLong(i128),
+    Bytes(Vec<u8>),
 }
 
 impl MachineType {
@@ -48,6 +53,7 @@ impl MachineType {
             MachineType::SignedLong(x) => InternalType::SignedLong(*x),
             MachineType::LongLong(x) => InternalType::LongLong(*x),
             MachineType::SignedLongLong(x) => InternalType::SignedLongLong(*x),
+            MachineType::Bytes(x) => InternalType::Bytes(x.clone()),
         }
     }
 }
@@ -65,6 +71,8 @@ impl InternalType {
             InternalType::SignedLong(x) => MachineType::SignedLong(*x),
             InternalType::LongLong(x) => MachineType::LongLong(*x),
             InternalType::SignedLongLong(x) => MachineType::SignedLongLong(*x),
+            InternalType::String(x) => MachineType::Bytes(x.as_bytes().to_vec()),
+            InternalType::Bytes(x) => MachineType::Bytes(x.clone()),
         }
     }
     pub fn to_object(&self, py: Python<'_>) -> Py<PyAny> {
@@ -79,9 +87,39 @@ impl InternalType {
             InternalType::SignedLong(x) => x.to_object(py),
             InternalType::LongLong(x) => x.to_object(py),
             InternalType::SignedLongLong(x) => x.to_object(py),
+            InternalType::String(x) => x.to_object(py),
+            InternalType::Bytes(x) => x.to_object(py),
         }
     }
 }
+
+macro_rules! impl_TryIntos (( $($typ:ident),* ) => {
+    $(
+        impl TryInto<$typ> for &InternalType {
+            type Error = PyErr;
+
+            fn try_into(self) -> Result<$typ, Self::Error> {
+                match self {
+                    InternalType::Byte(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    InternalType::SignedByte(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    InternalType::Short(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    InternalType::SignedShort(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    InternalType::Int(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    InternalType::SignedInt(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    InternalType::Long(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    InternalType::SignedLong(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    InternalType::LongLong(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    InternalType::SignedLongLong(x) => (*x).try_into().map_err(|_| {PyValueError::new_err("Bad Type")}),
+                    _ => Err(PyValueError::new_err("Bad Type"))
+                }
+            }
+        }
+    )*
+});
+
+impl_TryIntos!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize);
+
+// Type for **kwargs
 
 // Export
 

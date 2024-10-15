@@ -1,5 +1,7 @@
-use pyo3::prelude::*;
+use std::collections::HashMap;
+
 use pyo3::exceptions::PyTypeError;
+use pyo3::prelude::*;
 
 use crate::packet;
 use crate::types;
@@ -11,20 +13,31 @@ use crate::types;
 pub trait FieldTrait {
     // &[u8] is used when dissecting
     // Vec<u8> is used when building
-    fn init(&mut self);
-    fn m2i(&self, pkt: &packet::Packet, x: types::MachineType) -> Result<types::InternalType, PyErr>;
-    fn i2m(&self, pkt: &packet::Packet, x: Option<types::InternalType>) -> Result<types::MachineType, PyErr>;
+    fn init(&mut self, kwargs: Option<HashMap<String, types::InternalType>>) -> PyResult<()>;
+    fn m2i(
+        &self,
+        pkt: &packet::Packet,
+        x: types::MachineType,
+    ) -> Result<types::InternalType, PyErr>;
+    fn i2m(
+        &self,
+        pkt: &packet::Packet,
+        x: Option<types::InternalType>,
+    ) -> Result<types::MachineType, PyErr>;
     fn addfield(
         &self,
         pkt: &packet::Packet,
         s: Vec<u8>,
         val: Option<types::InternalType>,
     ) -> Result<Vec<u8>, PyErr>;
-    fn getfield<'a>(&self, pkt: &packet::Packet, x: &'a [u8])
-        -> Result<(types::InternalType, &'a [u8]), PyErr>;
+    fn getfield<'a>(
+        &self,
+        pkt: &packet::Packet,
+        x: &'a [u8],
+    ) -> Result<(types::InternalType, &'a [u8]), PyErr>;
 }
 
-// Generic Field type that selects a sub-type
+// Standard fields
 
 macro_rules! Field {
     ($pyname:ident, $i:ident, $m:ty, $leendian:expr) => {
@@ -37,13 +50,22 @@ macro_rules! Field {
         // Define trait
         impl FieldTrait for $pyname {
             // https://doc.rust-lang.org/book/ch19-03-advanced-traits.html#specifying-placeholder-types-in-trait-definitions-with-associated-types
-            fn init(&mut self) {
+            fn init(&mut self, _: Option<HashMap<String, types::InternalType>>) -> PyResult<()> {
                 self.sz = std::mem::size_of::<$m>();
+                Ok(())
             }
-            fn m2i(&self, _: &packet::Packet, x: types::MachineType) -> Result<types::InternalType, PyErr> {
+            fn m2i(
+                &self,
+                _: &packet::Packet,
+                x: types::MachineType,
+            ) -> Result<types::InternalType, PyErr> {
                 Ok(x.as_internal())
             }
-            fn i2m(&self, _: &packet::Packet, x: Option<types::InternalType>) -> Result<types::MachineType, PyErr> {
+            fn i2m(
+                &self,
+                _: &packet::Packet,
+                x: Option<types::InternalType>,
+            ) -> Result<types::MachineType, PyErr> {
                 if let Some(val) = x {
                     Ok(val.as_machine())
                 } else {
@@ -64,11 +86,9 @@ macro_rules! Field {
                         } else {
                             s.extend_from_slice(&x.to_be_bytes());
                         };
-                        return Ok(s)
-                    },
-                    _ => {
-                        Err(PyTypeError::new_err("Bad type !"))
+                        return Ok(s);
                     }
+                    _ => Err(PyTypeError::new_err("Bad type !")),
                 }
             }
             fn getfield<'a>(
@@ -94,24 +114,35 @@ macro_rules! Field {
         // https://pyo3.rs/v0.20.2/trait_bounds#implementation-of-the-trait-bounds-for-the-python-class
         #[pymethods]
         impl $pyname {
+            #[pyo3(signature = (name, default, **kwargs))]
             #[staticmethod]
-            pub fn new(name: String, default: types::InternalType) -> Field {
+            pub fn new(
+                name: String,
+                default: types::InternalType,
+                kwargs: Option<HashMap<String, types::InternalType>>,
+            ) -> PyResult<Field> {
                 let mut x = $pyname { sz: 0 };
-                x.init();
-                Field {
+                x.init(kwargs)?;
+                Ok(Field {
                     name: name,
                     default: default,
                     sz: x.sz,
-                    fieldtype: FieldType::$pyname(
-                        x
-                    )
-                }
+                    fieldtype: FieldType::$pyname(x),
+                })
             }
-            pub fn m2i(&self, pkt: &packet::Packet, x: types::MachineType) -> Result<types::InternalType, PyErr> {
+            pub fn m2i(
+                &self,
+                pkt: &packet::Packet,
+                x: types::MachineType,
+            ) -> Result<types::InternalType, PyErr> {
                 FieldTrait::m2i(self, pkt, x)
             }
             #[pyo3(signature=(pkt, x=None))]
-            pub fn i2m(&self, pkt: &packet::Packet, x: Option<types::InternalType>) -> Result<types::MachineType, PyErr> {
+            pub fn i2m(
+                &self,
+                pkt: &packet::Packet,
+                x: Option<types::InternalType>,
+            ) -> Result<types::MachineType, PyErr> {
                 FieldTrait::i2m(self, pkt, x)
             }
             #[pyo3(signature=(pkt, s, val=None))]
@@ -149,6 +180,130 @@ Field![LESignedShortField, SignedShort, i16, true];
 Field![LESignedIntField, SignedInt, i32, true];
 Field![LESignedLongField, SignedLong, i64, true];
 
+// String fields
+
+macro_rules! _StrField {
+    ($pyname:ident) => {
+        #[pyclass]
+        #[derive(Clone)]
+        pub struct $pyname {
+            sz: usize,
+            remain: usize,
+        }
+
+        // Define trait
+        impl FieldTrait for $pyname {
+            // https://doc.rust-lang.org/book/ch19-03-advanced-traits.html#specifying-placeholder-types-in-trait-definitions-with-associated-types
+            fn init(
+                &mut self,
+                kwargs: Option<HashMap<String, types::InternalType>>,
+            ) -> Result<(), pyo3::PyErr> {
+                self.sz = 0;
+                if let Some(options) = kwargs {
+                    if let Some(remain) = options.get("remain") {
+                        self.remain = remain.try_into()?;
+                    }
+                }
+                Ok(())
+            }
+            fn m2i(
+                &self,
+                _: &packet::Packet,
+                x: types::MachineType,
+            ) -> Result<types::InternalType, PyErr> {
+                Ok(x.as_internal())
+            }
+            fn i2m(
+                &self,
+                _: &packet::Packet,
+                x: Option<types::InternalType>,
+            ) -> Result<types::MachineType, PyErr> {
+                if let Some(val) = x {
+                    Ok(val.as_machine())
+                } else {
+                    Ok(types::MachineType::Bytes(Vec::new()))
+                }
+            }
+            fn addfield(
+                &self,
+                pkt: &packet::Packet,
+                mut s: Vec<u8>,
+                val: Option<types::InternalType>,
+            ) -> Result<Vec<u8>, PyErr> {
+                let mval = self.i2m(pkt, val)?;
+                match mval {
+                    types::MachineType::Bytes(x) => {
+                        s.extend_from_slice(&x);
+                        return Ok(s);
+                    }
+                    _ => Err(PyTypeError::new_err("Bad type !")),
+                }
+            }
+            fn getfield<'a>(
+                &self,
+                pkt: &packet::Packet,
+                x: &'a [u8],
+            ) -> Result<(types::InternalType, &'a [u8]), PyErr> {
+                Ok((self.m2i(pkt, types::MachineType::Bytes(x.to_vec()))?, &[]))
+            }
+        }
+
+        // Define python aliases
+        // https://pyo3.rs/v0.20.2/trait_bounds#implementation-of-the-trait-bounds-for-the-python-class
+        #[pymethods]
+        impl $pyname {
+            #[pyo3(signature = (name, default, **kwargs))]
+            #[staticmethod]
+            pub fn new(
+                name: String,
+                default: types::InternalType,
+                kwargs: Option<HashMap<String, types::InternalType>>,
+            ) -> PyResult<Field> {
+                let mut x = $pyname { sz: 0, remain: 0 };
+                x.init(kwargs)?;
+                Ok(Field {
+                    name: name,
+                    default: default,
+                    sz: x.sz,
+                    fieldtype: FieldType::$pyname(x),
+                })
+            }
+            pub fn m2i(
+                &self,
+                pkt: &packet::Packet,
+                x: types::MachineType,
+            ) -> Result<types::InternalType, PyErr> {
+                FieldTrait::m2i(self, pkt, x)
+            }
+            #[pyo3(signature=(pkt, x=None))]
+            pub fn i2m(
+                &self,
+                pkt: &packet::Packet,
+                x: Option<types::InternalType>,
+            ) -> Result<types::MachineType, PyErr> {
+                FieldTrait::i2m(self, pkt, x)
+            }
+            #[pyo3(signature=(pkt, s, val=None))]
+            pub fn addfield(
+                &self,
+                pkt: &packet::Packet,
+                s: Vec<u8>,
+                val: Option<types::InternalType>,
+            ) -> Result<Vec<u8>, PyErr> {
+                FieldTrait::addfield(self, pkt, s, val)
+            }
+            pub fn getfield<'a>(
+                &self,
+                pkt: &packet::Packet,
+                x: &'a [u8],
+            ) -> Result<(types::InternalType, &'a [u8]), PyErr> {
+                FieldTrait::getfield(self, pkt, x)
+            }
+        }
+    };
+}
+
+_StrField![StrField];
 
 // Generic
 
@@ -168,6 +323,7 @@ pub enum FieldType {
     LESignedShortField(LESignedShortField),
     LESignedIntField(LESignedIntField),
     LESignedLongField(LESignedLongField),
+    StrField(StrField),
 }
 
 impl FieldType {
@@ -187,6 +343,7 @@ impl FieldType {
             FieldType::LESignedShortField(x) => Box::new(x),
             FieldType::LESignedIntField(x) => Box::new(x),
             FieldType::LESignedLongField(x) => Box::new(x),
+            FieldType::StrField(x) => Box::new(x),
         }
     }
 }
@@ -218,6 +375,6 @@ pub fn fields(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<LESignedShortField>()?;
     m.add_class::<LESignedIntField>()?;
     m.add_class::<LESignedLongField>()?;
+    m.add_class::<StrField>()?;
     Ok(())
 }
-
