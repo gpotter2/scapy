@@ -7,8 +7,12 @@ use std::convert::TryInto;
  * This implements how the values are stored within Scapy.
  */
 
+// NOTE: This file looks extremly dumb, but I, for the love of god, could not figure out
+// how to make it look nicer. It sounds extremly dumb, but it seems rust just WAAANNNTTTSS you
+// to unpack that f****** enum.
+
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum InternalType {
     Byte(u8),
     SignedByte(i8),
@@ -22,6 +26,26 @@ pub enum InternalType {
     SignedLongLong(i128),
     String(String),
     Bytes(Vec<u8>),
+}
+
+impl PartialEq for InternalType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (InternalType::Byte(a), InternalType::Byte(b)) => a == b,
+            (InternalType::SignedByte(a), InternalType::SignedByte(b)) => a == b,
+            (InternalType::Short(a), InternalType::Short(b)) => a == b,
+            (InternalType::SignedShort(a), InternalType::SignedShort(b)) => a == b,
+            (InternalType::Int(a), InternalType::Int(b)) => a == b,
+            (InternalType::SignedInt(a), InternalType::SignedInt(b)) => a == b,
+            (InternalType::Long(a), InternalType::Long(b)) => a == b,
+            (InternalType::SignedLong(a), InternalType::SignedLong(b)) => a == b,
+            (InternalType::LongLong(a), InternalType::LongLong(b)) => a == b,
+            (InternalType::SignedLongLong(a), InternalType::SignedLongLong(b)) => a == b,
+            (InternalType::String(a), InternalType::String(b)) => a == b,
+            (InternalType::Bytes(a), InternalType::Bytes(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 #[pyclass]
@@ -93,6 +117,8 @@ impl InternalType {
     }
 }
 
+// Try to be a bit smart: this implements all casting of InternalTypes using a macro...
+
 macro_rules! impl_TryIntos (( $($typ:ident),* ) => {
     $(
         impl TryInto<$typ> for &InternalType {
@@ -119,9 +145,9 @@ macro_rules! impl_TryIntos (( $($typ:ident),* ) => {
 
 impl_TryIntos!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize);
 
-// Type for **kwargs
-
-// Export
+/*
+ * Module definition into the Python world
+ */
 
 #[pymodule]
 pub fn types(m: &Bound<'_, PyModule>) -> PyResult<()> {

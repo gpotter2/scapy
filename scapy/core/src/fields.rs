@@ -7,7 +7,7 @@ use crate::packet;
 use crate::types;
 
 /*
- * FieldTrait is the trait that defines the behavior of Fields.
+ * FieldTrait is the common trait that defines the behavior of Fields.
  */
 
 pub trait FieldTrait {
@@ -120,10 +120,10 @@ macro_rules! Field {
                 name: String,
                 default: types::InternalType,
                 kwargs: Option<HashMap<String, types::InternalType>>,
-            ) -> PyResult<Field> {
+            ) -> PyResult<FieldProxy> {
                 let mut x = $pyname { sz: 0 };
                 x.init(kwargs)?;
-                Ok(Field {
+                Ok(FieldProxy {
                     name: name,
                     default: default,
                     sz: x.sz,
@@ -258,10 +258,10 @@ macro_rules! _StrField {
                 name: String,
                 default: types::InternalType,
                 kwargs: Option<HashMap<String, types::InternalType>>,
-            ) -> PyResult<Field> {
+            ) -> PyResult<FieldProxy> {
                 let mut x = $pyname { sz: 0, remain: 0 };
                 x.init(kwargs)?;
-                Ok(Field {
+                Ok(FieldProxy {
                     name: name,
                     default: default,
                     sz: x.sz,
@@ -326,6 +326,8 @@ pub enum FieldType {
     StrField(StrField),
 }
 
+// Why. WHY? All my enum types implement FieldTrait, WHY do i have to do a ridiculous enum.
+
 impl FieldType {
     pub fn as_trait(&self) -> Box<&dyn FieldTrait> {
         match self {
@@ -348,16 +350,28 @@ impl FieldType {
     }
 }
 
+/*
+ * FieldProxy is made to be passed to, or received from, the Python world.
+ */
+
 #[pyclass]
 #[derive(Clone)]
-pub struct Field {
+pub struct FieldProxy {
     pub name: String,
     pub default: types::InternalType,
     pub sz: usize,
     pub fieldtype: FieldType,
 }
 
-// Export
+/*
+ * FieldList is a 'list of fields' type. Typically, fields_desc.
+ */
+
+pub type FieldList = Vec<FieldProxy>;
+
+/*
+ * Module definition into the Python world
+ */
 
 #[pymodule]
 pub fn fields(m: &Bound<'_, PyModule>) -> PyResult<()> {
