@@ -14,6 +14,11 @@ pub trait FieldTrait {
     // &[u8] is used when dissecting
     // Vec<u8> is used when building
     fn init(&mut self, kwargs: Option<HashMap<String, types::InternalType>>) -> PyResult<()>;
+    fn any2i<'py>(
+        &self,
+        pkt: Option<&packet::Packet>,
+        x: &Bound<'py, PyAny>,
+    ) -> Result<types::InternalType, PyErr>;
     fn m2i(
         &self,
         pkt: &packet::Packet,
@@ -53,6 +58,13 @@ macro_rules! Field {
             fn init(&mut self, _: Option<HashMap<String, types::InternalType>>) -> PyResult<()> {
                 self.sz = std::mem::size_of::<$m>();
                 Ok(())
+            }
+            fn any2i<'py>(
+                &self,
+                _: Option<&packet::Packet>,
+                x: &Bound<'py, PyAny>,
+            ) -> Result<types::InternalType, PyErr> {
+                Ok(types::InternalType::$i(x.extract()?))
             }
             fn m2i(
                 &self,
@@ -116,16 +128,16 @@ macro_rules! Field {
         impl $pyname {
             #[pyo3(signature = (name, default, **kwargs))]
             #[staticmethod]
-            pub fn new(
+            pub fn new<'py>(
                 name: String,
-                default: types::InternalType,
+                default: &Bound<'py, PyAny>,
                 kwargs: Option<HashMap<String, types::InternalType>>,
             ) -> PyResult<FieldProxy> {
                 let mut x = $pyname { sz: 0 };
                 x.init(kwargs)?;
                 Ok(FieldProxy {
                     name: name,
-                    default: default,
+                    default: types::InternalType::$i(default.extract()?),
                     sz: x.sz,
                     fieldtype: FieldType::$pyname(x),
                 })
@@ -206,6 +218,13 @@ macro_rules! _StrField {
                 }
                 Ok(())
             }
+            fn any2i<'py>(
+                &self,
+                _: Option<&packet::Packet>,
+                x: &Bound<'py, PyAny>,
+            ) -> Result<types::InternalType, PyErr> {
+                Ok(types::InternalType::Bytes(x.extract()?))
+            }
             fn m2i(
                 &self,
                 _: &packet::Packet,
@@ -254,16 +273,16 @@ macro_rules! _StrField {
         impl $pyname {
             #[pyo3(signature = (name, default, **kwargs))]
             #[staticmethod]
-            pub fn new(
+            pub fn new<'py>(
                 name: String,
-                default: types::InternalType,
+                default: &Bound<'py, PyAny>,
                 kwargs: Option<HashMap<String, types::InternalType>>,
             ) -> PyResult<FieldProxy> {
                 let mut x = $pyname { sz: 0, remain: 0 };
                 x.init(kwargs)?;
                 Ok(FieldProxy {
                     name: name,
-                    default: default,
+                    default: types::InternalType::Bytes(default.extract()?),
                     sz: x.sz,
                     fieldtype: FieldType::$pyname(x),
                 })
@@ -326,7 +345,7 @@ pub enum FieldType {
     StrField(StrField),
 }
 
-// Why. WHY? All my enum types implement FieldTrait, WHY do i have to do a ridiculous enum.
+// Huh, I feel very dumb writing this.
 
 impl FieldType {
     pub fn as_trait(&self) -> Box<&dyn FieldTrait> {

@@ -1,5 +1,5 @@
 use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
+use pyo3::{prelude::*, IntoPyObjectExt};
 use std::convert::TryInto;
 
 /*
@@ -13,6 +13,7 @@ use std::convert::TryInto;
 
 #[pyclass]
 #[derive(Clone, Debug)]
+#[derive(IntoPyObjectRef)]
 pub enum InternalType {
     Byte(u8),
     SignedByte(i8),
@@ -44,6 +45,25 @@ impl PartialEq for InternalType {
             (InternalType::String(a), InternalType::String(b)) => a == b,
             (InternalType::Bytes(a), InternalType::Bytes(b)) => a == b,
             _ => false,
+        }
+    }
+}
+
+impl std::fmt::Display for InternalType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InternalType::Byte(x) => write!(f, "Byte({})", x),
+            InternalType::SignedByte(x) => write!(f, "SignedByte({})", x),
+            InternalType::Short(x) => write!(f, "Short({})", x),
+            InternalType::SignedShort(x) => write!(f, "SignedShort({})", x),
+            InternalType::Int(x) => write!(f, "Int({})", x),
+            InternalType::SignedInt(x) => write!(f, "SignedInt({})", x),
+            InternalType::Long(x) => write!(f, "Long({})", x),
+            InternalType::SignedLong(x) => write!(f, "SignedLong({})", x),
+            InternalType::LongLong(x) => write!(f, "LongLong({})", x),
+            InternalType::SignedLongLong(x) => write!(f, "SignedLongLong({})", x),
+            InternalType::String(x) => write!(f, "String({})", x),
+            InternalType::Bytes(x) => write!(f, "Bytes({:?})", x),
         }
     }
 }
@@ -99,23 +119,25 @@ impl InternalType {
             InternalType::Bytes(x) => MachineType::Bytes(x.clone()),
         }
     }
-    pub fn to_object(&self, py: Python<'_>) -> Py<PyAny> {
+    pub fn to_object(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         match self {
-            InternalType::Byte(x) => x.to_object(py),
-            InternalType::SignedByte(x) => x.to_object(py),
-            InternalType::Short(x) => x.to_object(py),
-            InternalType::SignedShort(x) => x.to_object(py),
-            InternalType::Int(x) => x.to_object(py),
-            InternalType::SignedInt(x) => x.to_object(py),
-            InternalType::Long(x) => x.to_object(py),
-            InternalType::SignedLong(x) => x.to_object(py),
-            InternalType::LongLong(x) => x.to_object(py),
-            InternalType::SignedLongLong(x) => x.to_object(py),
-            InternalType::String(x) => x.to_object(py),
-            InternalType::Bytes(x) => x.to_object(py),
+            InternalType::Byte(x) => x.into_py_any(py),
+            InternalType::SignedByte(x) => x.into_py_any(py),
+            InternalType::Short(x) => x.into_py_any(py),
+            InternalType::SignedShort(x) => x.into_py_any(py),
+            InternalType::Int(x) => x.into_py_any(py),
+            InternalType::SignedInt(x) => x.into_py_any(py),
+            InternalType::Long(x) => x.into_py_any(py),
+            InternalType::SignedLong(x) => x.into_py_any(py),
+            InternalType::LongLong(x) => x.into_py_any(py),
+            InternalType::SignedLongLong(x) => x.into_py_any(py),
+            InternalType::String(x) => x.into_py_any(py),
+            InternalType::Bytes(x) => x.into_py_any(py),
         }
     }
 }
+
+
 
 // Try to be a bit smart: this implements all casting of InternalTypes using a macro...
 
