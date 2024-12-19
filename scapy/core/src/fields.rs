@@ -17,7 +17,7 @@ pub trait FieldTrait {
     fn any2i<'py>(
         &self,
         pkt: Option<&packet::Packet>,
-        x: &Bound<'py, PyAny>,
+        x: &Option<&Bound<'py, PyAny>>,
     ) -> Result<types::InternalType, PyErr>;
     fn m2i(
         &self,
@@ -27,13 +27,13 @@ pub trait FieldTrait {
     fn i2m(
         &self,
         pkt: &packet::Packet,
-        x: Option<types::InternalType>,
+        x: &Option<&types::InternalType>,
     ) -> Result<types::MachineType, PyErr>;
     fn addfield(
         &self,
         pkt: &packet::Packet,
         s: Vec<u8>,
-        val: Option<types::InternalType>,
+        val: &Option<&types::InternalType>,
     ) -> Result<Vec<u8>, PyErr>;
     fn getfield<'a>(
         &self,
@@ -42,9 +42,18 @@ pub trait FieldTrait {
     ) -> Result<(types::InternalType, &'a [u8]), PyErr>;
 }
 
-// Standard fields
+/*
+ * Standard fields are implemented thanks to a macro that allows to
+ * duplicate their definitions depending on a type parameters.
+ */
 
 macro_rules! Field {
+    /*
+     * $pyname is the Python name of this field, e.g. 'ByteField'
+     * $i is the types::InternalType::$i used for this field. e.g. 'Byte'
+     * $m is the rust type that is used for binary equivalent. e.g. u8
+     * $leendian indicates whether the endianness is LowEndian or not. e.g. false
+     */
     ($pyname:ident, $i:ident, $m:ty, $leendian:expr) => {
         #[pyclass]
         #[derive(Clone)]
@@ -62,9 +71,13 @@ macro_rules! Field {
             fn any2i<'py>(
                 &self,
                 _: Option<&packet::Packet>,
-                x: &Bound<'py, PyAny>,
+                x: &Option<&Bound<'py, PyAny>>,
             ) -> Result<types::InternalType, PyErr> {
-                Ok(types::InternalType::$i(x.extract()?))
+                if let Some(x) = x {
+                    Ok(types::InternalType::$i(x.extract()?))
+                } else {
+                    Ok(types::InternalType::$i(0))
+                }
             }
             fn m2i(
                 &self,
@@ -76,7 +89,7 @@ macro_rules! Field {
             fn i2m(
                 &self,
                 _: &packet::Packet,
-                x: Option<types::InternalType>,
+                x: &Option<&types::InternalType>,
             ) -> Result<types::MachineType, PyErr> {
                 if let Some(val) = x {
                     Ok(val.as_machine())
@@ -88,9 +101,9 @@ macro_rules! Field {
                 &self,
                 pkt: &packet::Packet,
                 mut s: Vec<u8>,
-                val: Option<types::InternalType>,
+                val: &Option<&types::InternalType>,
             ) -> Result<Vec<u8>, PyErr> {
-                let mval = self.i2m(pkt, val)?;
+                let mval = FieldTrait::i2m(self, pkt, val)?;
                 match mval {
                     types::MachineType::$i(x) => {
                         if $leendian {
@@ -130,14 +143,18 @@ macro_rules! Field {
             #[staticmethod]
             pub fn new<'py>(
                 name: String,
-                default: &Bound<'py, PyAny>,
+                default: Option<&Bound<'py, PyAny>>,
                 kwargs: Option<HashMap<String, types::InternalType>>,
             ) -> PyResult<FieldProxy> {
                 let mut x = $pyname { sz: 0 };
                 x.init(kwargs)?;
                 Ok(FieldProxy {
                     name: name,
-                    default: types::InternalType::$i(default.extract()?),
+                    default: if let Some(default) = default {
+                        Some(types::InternalType::$i(default.extract()?))
+                    } else {
+                        None
+                    },
                     sz: x.sz,
                     fieldtype: FieldType::$pyname(x),
                 })
@@ -153,18 +170,18 @@ macro_rules! Field {
             pub fn i2m(
                 &self,
                 pkt: &packet::Packet,
-                x: Option<types::InternalType>,
+                x: Option<&types::InternalType>,
             ) -> Result<types::MachineType, PyErr> {
-                FieldTrait::i2m(self, pkt, x)
+                FieldTrait::i2m(self, pkt, &x)
             }
             #[pyo3(signature=(pkt, s, val=None))]
             pub fn addfield(
                 &self,
                 pkt: &packet::Packet,
                 s: Vec<u8>,
-                val: Option<types::InternalType>,
+                val: Option<&types::InternalType>,
             ) -> Result<Vec<u8>, PyErr> {
-                FieldTrait::addfield(self, pkt, s, val)
+                FieldTrait::addfield(self, pkt, s, &val)
             }
             pub fn getfield<'a>(
                 &self,
@@ -192,7 +209,9 @@ Field![LESignedShortField, SignedShort, i16, true];
 Field![LESignedIntField, SignedInt, i32, true];
 Field![LESignedLongField, SignedLong, i64, true];
 
-// String fields
+/*
+ * Same for string fields.
+ */
 
 macro_rules! _StrField {
     ($pyname:ident) => {
@@ -200,7 +219,7 @@ macro_rules! _StrField {
         #[derive(Clone)]
         pub struct $pyname {
             sz: usize,
-            remain: usize,
+            remain: Option<usize>,
         }
 
         // Define trait
@@ -213,7 +232,7 @@ macro_rules! _StrField {
                 self.sz = 0;
                 if let Some(options) = kwargs {
                     if let Some(remain) = options.get("remain") {
-                        self.remain = remain.try_into()?;
+                        self.remain = Some(remain.try_into()?);
                     }
                 }
                 Ok(())
@@ -221,9 +240,13 @@ macro_rules! _StrField {
             fn any2i<'py>(
                 &self,
                 _: Option<&packet::Packet>,
-                x: &Bound<'py, PyAny>,
+                x: &Option<&Bound<'py, PyAny>>,
             ) -> Result<types::InternalType, PyErr> {
-                Ok(types::InternalType::Bytes(x.extract()?))
+                if let Some(x) = x {
+                    Ok(types::InternalType::Bytes(x.extract()?))
+                } else {
+                    Ok(types::InternalType::Bytes(Vec::new()))
+                }
             }
             fn m2i(
                 &self,
@@ -235,7 +258,7 @@ macro_rules! _StrField {
             fn i2m(
                 &self,
                 _: &packet::Packet,
-                x: Option<types::InternalType>,
+                x: &Option<&types::InternalType>,
             ) -> Result<types::MachineType, PyErr> {
                 if let Some(val) = x {
                     Ok(val.as_machine())
@@ -247,9 +270,9 @@ macro_rules! _StrField {
                 &self,
                 pkt: &packet::Packet,
                 mut s: Vec<u8>,
-                val: Option<types::InternalType>,
+                val: &Option<&types::InternalType>,
             ) -> Result<Vec<u8>, PyErr> {
-                let mval = self.i2m(pkt, val)?;
+                let mval = FieldTrait::i2m(self, pkt, val)?;
                 match mval {
                     types::MachineType::Bytes(x) => {
                         s.extend_from_slice(&x);
@@ -275,14 +298,21 @@ macro_rules! _StrField {
             #[staticmethod]
             pub fn new<'py>(
                 name: String,
-                default: &Bound<'py, PyAny>,
+                default: Option<&Bound<'py, PyAny>>,
                 kwargs: Option<HashMap<String, types::InternalType>>,
             ) -> PyResult<FieldProxy> {
-                let mut x = $pyname { sz: 0, remain: 0 };
+                let mut x = $pyname {
+                    sz: 0,
+                    remain: None,
+                };
                 x.init(kwargs)?;
                 Ok(FieldProxy {
                     name: name,
-                    default: types::InternalType::Bytes(default.extract()?),
+                    default: if let Some(default) = default {
+                        Some(types::InternalType::Bytes(default.extract()?))
+                    } else {
+                        None
+                    },
                     sz: x.sz,
                     fieldtype: FieldType::$pyname(x),
                 })
@@ -298,18 +328,18 @@ macro_rules! _StrField {
             pub fn i2m(
                 &self,
                 pkt: &packet::Packet,
-                x: Option<types::InternalType>,
+                x: Option<&types::InternalType>,
             ) -> Result<types::MachineType, PyErr> {
-                FieldTrait::i2m(self, pkt, x)
+                FieldTrait::i2m(self, pkt, &x)
             }
             #[pyo3(signature=(pkt, s, val=None))]
             pub fn addfield(
                 &self,
                 pkt: &packet::Packet,
                 s: Vec<u8>,
-                val: Option<types::InternalType>,
+                val: Option<&types::InternalType>,
             ) -> Result<Vec<u8>, PyErr> {
-                FieldTrait::addfield(self, pkt, s, val)
+                FieldTrait::addfield(self, pkt, s, &val)
             }
             pub fn getfield<'a>(
                 &self,
@@ -325,6 +355,11 @@ macro_rules! _StrField {
 _StrField![StrField];
 
 // Generic
+
+/*
+ * FieldType is an enum that includes all possible Field types. This is used
+ * to differentiate the types from each other when stored as fields_desc.
+ */
 
 #[derive(Clone)]
 pub enum FieldType {
@@ -371,13 +406,14 @@ impl FieldType {
 
 /*
  * FieldProxy is made to be passed to, or received from, the Python world.
+ * It is an instance of a 'Field'.
  */
 
 #[pyclass]
 #[derive(Clone)]
 pub struct FieldProxy {
     pub name: String,
-    pub default: types::InternalType,
+    pub default: Option<types::InternalType>,
     pub sz: usize,
     pub fieldtype: FieldType,
 }

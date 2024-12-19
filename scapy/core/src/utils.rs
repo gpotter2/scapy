@@ -8,14 +8,16 @@ pub(crate) fn generate_uuid() -> String {
      */
 
     let start = SystemTime::now();
-    let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("Time went backwards");
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
     let nanos = since_the_epoch.as_nanos();
 
     // Convert the nanoseconds to a byte array
     let nanos_bytes = nanos.to_be_bytes().to_vec();
 
     // Add 2 bytes before that to get 18bytes
-    let mut extended_bytes = vec![0x53u8, 0x43u8];
+    let mut extended_bytes = vec![0x50u8, 0x59u8];
     extended_bytes.extend_from_slice(&nanos_bytes);
 
     // Format the bytes into a UUID-like string

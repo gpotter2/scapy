@@ -31,20 +31,20 @@ struct PacketClass {
     fields_desc: FieldList,
     _uuid: String,
     payload_guess: Vec<(Option<HashMap<String, types::InternalType>>, String)>,
-    _overloaded_fields: HashMap<String, HashMap<String, types::InternalType>>,
+    _overload_fields: HashMap<String, HashMap<String, types::InternalType>>,
 }
 
 impl PacketClass {
     pub fn get_field(&self, attr: &String) -> PyResult<FieldProxy> {
         match self.fields_desc.iter().find(|f| &f.name == attr) {
             Some(x) => Ok(x.clone()),
-            _ => Err(PyAttributeError::new_err("Unknown field name")),
+            _ => Err(PyAttributeError::new_err("Unknown field name (get_field)")),
         }
     }
 }
 
 /*
- * PacketClassProxy is a proxy class used from the Python and Rust worlds to access
+ * PacketClassProxy is a proxy class used from the Python and Rust worlds to represent
  * the global PacketClass stored in PACKET_CLASSES. It's made to be copied, cloned, etc. around
  */
 
@@ -64,7 +64,7 @@ impl PacketClassProxy {
             fields_desc: fields_desc,
             _uuid: generate_uuid(),
             payload_guess: Vec::new(),
-            _overloaded_fields: HashMap::new(),
+            _overload_fields: HashMap::new(),
         };
         // Create a proxy to it
         let pclassproxy = PacketClassProxy {
@@ -88,17 +88,34 @@ impl PacketClassProxy {
     pub fn __call__(
         &self,
         _pkt: Option<&[u8]>,
-        kwargs: Option<HashMap<String, types::InternalType>>,
+        kwargs: Option<HashMap<String, pyo3::Bound<'_, pyo3::PyAny>>>,
     ) -> PyResult<Packet> {
+        let proxy = PacketClassProxy {
+            _uuid: self._uuid.clone(),
+        };
         let mut p = Packet {
-            proxy: PacketClassProxy {
-                _uuid: self._uuid.clone(),
+            default_fields: {
+                let mut map = HashMap::new();
+                for f in &proxy.get_class().lock().unwrap().fields_desc {
+                    map.insert(f.name.clone(), f.default.clone());
+                }
+                map
             },
+            proxy: proxy,
             fields: HashMap::new(),
+            overloaded_fields: HashMap::new(),
             payload: None,
         };
         if let Some(s) = _pkt {
+            // Doing dissection
             p.dissect(s)?;
+        } else {
+            // Adding default values for build
+            if let Some(kwargs) = kwargs {
+                for (attr, val) in kwargs {
+                    p.setfieldval(attr, Some(&val))?;
+                }
+            }
         }
         Ok(p)
     }
@@ -115,11 +132,19 @@ impl PacketClassProxy {
     }
 
     /*
-     * Getter for '.payload_guess'
+     * Getter for '.payload_guess'. DEBUG ONLY
      */
-    #[getter(payload_guess)]
-    fn payload_guess(&self) -> Vec<(Option<HashMap<String, InternalType>>, String)> {
+    #[getter(_payload_guess)]
+    fn _payload_guess(&self) -> Vec<(Option<HashMap<String, InternalType>>, String)> {
         self.get_class().lock().unwrap().payload_guess.clone()
+    }
+
+    /*
+     * Getter for '._overload_fields'.  DEBUG ONLY
+     */
+    #[getter(_overload_fields)]
+    fn _overload_fields(&self) -> HashMap<String, HashMap<String, InternalType>> {
+        self.get_class().lock().unwrap()._overload_fields.clone()
     }
 }
 
@@ -149,7 +174,7 @@ static RAW: LazyLock<PacketClassProxy> = LazyLock::new(|| {
     Python::with_gil(|py| {
         PacketClassProxy::new(
             "Raw",
-            [StrField::new("load".to_string(), &PyList::empty(py), None).unwrap()].to_vec(),
+            [StrField::new("load".to_string(), Some(&PyList::empty(py)), None).unwrap()].to_vec(),
         )
     })
 });
@@ -158,7 +183,7 @@ static RAW: LazyLock<PacketClassProxy> = LazyLock::new(|| {
  * Packet is the rust equivalent of Scapy's main 'Packet' structure. It's the instance object
  * of a PacketClass.
  *
- * As definitions are done in Python, this is never really used directly.
+ * As definitions are done in Python, this shouldn't really be used directly.
  */
 
 #[pyclass]
@@ -167,7 +192,11 @@ pub struct Packet {
     proxy: PacketClassProxy,
     // Stores the current values of the various fields
     #[pyo3(get)]
-    fields: HashMap<String, types::InternalType>,
+    fields: HashMap<String, Option<types::InternalType>>,
+    #[pyo3(get)]
+    default_fields: HashMap<String, Option<types::InternalType>>,
+    #[pyo3(get)]
+    overloaded_fields: HashMap<String, types::InternalType>,
     // Payload
     payload: Option<Box<Packet>>,
 }
@@ -184,9 +213,13 @@ impl Packet {
      * Get / Set an internal field's value.
      */
 
-    fn _getfieldval(&self, attr: &String) -> PyResult<&types::InternalType> {
+    fn _getfieldval(&self, attr: &String) -> PyResult<Option<&types::InternalType>> {
         if self.fields.contains_key(attr) {
-            return Ok(self.fields.get(attr).unwrap());
+            return Ok(self.fields.get(attr).unwrap().as_ref());
+        } else if self.overloaded_fields.contains_key(attr) {
+            return Ok(Some(self.overloaded_fields.get(attr).unwrap()));
+        } else if self.default_fields.contains_key(attr) {
+            return Ok(self.default_fields.get(attr).unwrap().as_ref());
         } else {
             if let Some(payload) = &self.payload {
                 payload._getfieldval(attr)
@@ -211,7 +244,7 @@ impl Packet {
             .filter(|(ofvals, _)| {
                 if let Some(fvals) = ofvals {
                     return fvals.iter().all(|(k, v)| {
-                        if let Ok(fval) = self._getfieldval(k) {
+                        if let Ok(Some(fval)) = self._getfieldval(k) {
                             v == fval
                         } else {
                             false
@@ -239,7 +272,7 @@ impl Packet {
     fn do_dissect<'a>(&mut self, mut s: &'a [u8]) -> PyResult<&'a [u8]> {
         for f in &self.proxy.get_class().lock().unwrap().fields_desc {
             let (fval, remaining) = f.fieldtype.as_trait().getfield(self, s)?;
-            self.fields.insert(f.name.clone(), fval);
+            self.fields.insert(f.name.clone(), Some(fval));
             s = remaining;
         }
         Ok(s)
@@ -274,19 +307,94 @@ impl Packet {
     }
 
     /*
-     * Functions to set/get the '.payload' attribute.
+     * Internal function to build the bytes of the current packet
+     */
+    fn self_build(&self) -> PyResult<Vec<u8>> {
+        let mut s: Vec<u8> = Vec::new();
+        for f in &self.proxy.get_class().lock().unwrap().fields_desc {
+            s = f
+                .fieldtype
+                .as_trait()
+                .addfield(self, s, &self._getfieldval(&f.name).unwrap())?;
+        }
+        Ok(s)
+    }
+
+    /*
+     * Internal function to build the bytes of the payload
+     */
+    fn do_build_payload(&self) -> PyResult<Option<Vec<u8>>> {
+        if let Some(payload) = &self.payload {
+            Ok(Some(payload.do_build()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /*
+     * Internal function to add the padding
+     */
+    fn build_padding(&self) -> PyResult<Option<Vec<u8>>> {
+        Ok(None)
+    }
+
+    /*
+     * Return the bytes from a packet with the payload
+     */
+    fn do_build(&self) -> PyResult<Vec<u8>> {
+        self.post_build(self.self_build()?, self.do_build_payload()?)
+    }
+
+    /*
+     * Called right after the current layer is built
+     */
+    #[pyo3(signature = (pkt, pay))]
+    fn post_build(&self, mut pkt: Vec<u8>, pay: Option<Vec<u8>>) -> PyResult<Vec<u8>> {
+        if let Some(pay) = pay {
+            pkt.extend(pay);
+        }
+        Ok(pkt)
+    }
+
+    /*
+     * Entry point for build.
+     */
+    fn build(&self) -> PyResult<Vec<u8>> {
+        let mut p = self.do_build()?;
+        if let Some(payload) = self.do_build_payload()? {
+            p.extend(payload);
+        }
+        if let Some(padding) = self.build_padding()? {
+            p.extend(padding);
+        }
+        Ok(p)
+    }
+
+    /*
+     * Functions to set/get the '.payload' attribute and take into account the overloaded fields.
      */
 
     #[pyo3(signature = (payload))]
     fn add_payload(&mut self, payload: Packet) {
         if let Some(pay) = &mut self.payload {
+            // We have a payload already. Add it below it
             pay.add_payload(payload);
         } else {
+            // Check if that payload overloads some of our fields
+            let cls = payload.proxy.get_class();
+            let cls_locked = cls.lock().unwrap();
+            let overloaded_fields = cls_locked._overload_fields.get(&self.proxy._uuid);
+            // Add payload
             self.payload = Some(Box::new(payload));
+            // If the payload does overload some of our fields, apply them
+            if let Some(overloaded_fields) = overloaded_fields {
+                self.overloaded_fields = overloaded_fields.clone();
+            }
         }
     }
     fn remove_payload(&mut self) {
         self.payload = None;
+        self.overloaded_fields.clear();
     }
 
     /*
@@ -322,23 +430,34 @@ impl Packet {
      * Get / Set an internal field's value.
      */
 
-    fn getfieldval(&self, attr: String) -> PyResult<&types::InternalType> {
+    fn getfieldval(&self, attr: String) -> PyResult<Option<&types::InternalType>> {
         self._getfieldval(&attr)
     }
 
-    fn setfieldval(&mut self, attr: String, val: pyo3::Bound<'_, pyo3::PyAny>) -> PyResult<()> {
-        let val = self
-            ._get_field(&attr)?
-            .fieldtype
-            .as_trait()
-            .any2i(Some(self), &val)?;
+    #[pyo3(signature = (attr, val))]
+    fn setfieldval(
+        &mut self,
+        attr: String,
+        val: Option<&pyo3::Bound<'_, pyo3::PyAny>>,
+    ) -> PyResult<()> {
+        let val = if let Some(val) = val {
+            Some(
+                self._get_field(&attr)?
+                    .fieldtype
+                    .as_trait()
+                    .any2i(Some(self), &Some(val))?,
+            )
+        } else {
+            None
+        };
         self.fields.insert(attr, val);
         Ok(())
     }
 }
 
 /*
- * Standard binding methods
+ * Standard binding methods. Accessed by the Python world through proxies to bind
+ * together PacketClasses globally.
  */
 
 #[pyfunction]
@@ -356,11 +475,13 @@ pub fn bind_bottom_up<'py>(
             .iter()
             .map(|(k, v)| {
                 let fproxy = lowercls.get_field(k)?;
-                let fval = fproxy.fieldtype.as_trait().any2i(None, v);
+                let fval = fproxy.fieldtype.as_trait().any2i(None, &Some(v));
                 if let Ok(ival) = fval {
                     Ok((k.clone(), ival))
                 } else {
-                    Err(PyAttributeError::new_err("Unknown field name"))
+                    Err(PyAttributeError::new_err(
+                        "Unknown field name (bind_bottom_up)",
+                    ))
                 }
             })
             .collect();
@@ -380,22 +501,26 @@ pub fn bind_top_down<'py>(
     kwargs: Option<HashMap<String, Bound<'py, PyAny>>>,
 ) -> PyResult<()> {
     if let Some(kwargs) = kwargs {
-        let cls = upper.get_class();
-        let mut uppercls = cls.lock().unwrap();
+        let cls = lower.get_class();
+        let lowercls = cls.lock().unwrap();
         let kwargs_converted: Result<HashMap<String, types::InternalType>, PyErr> = kwargs
             .iter()
             .map(|(k, v)| {
-                let fproxy = uppercls.get_field(k)?;
-                let fval = fproxy.fieldtype.as_trait().any2i(None, v);
+                let fproxy = lowercls.get_field(k)?;
+                let fval = fproxy.fieldtype.as_trait().any2i(None, &Some(v));
                 if let Ok(ival) = fval {
                     Ok((k.clone(), ival))
                 } else {
-                    Err(PyAttributeError::new_err("Unknown field name"))
+                    Err(PyAttributeError::new_err(
+                        "Unknown field name (bind_top_down)",
+                    ))
                 }
             })
             .collect();
+        let cls = upper.get_class();
+        let mut uppercls = cls.lock().unwrap();
         uppercls
-            ._overloaded_fields
+            ._overload_fields
             .insert(lower._uuid.clone(), kwargs_converted?);
     }
     Ok(())
@@ -407,13 +532,14 @@ pub fn bind_layers<'py>(
     lower: &PacketClassProxy,
     upper: &mut PacketClassProxy,
     kwargs: Option<HashMap<String, Bound<'py, PyAny>>>,
-) {
-    bind_bottom_up(lower, upper, kwargs.clone());
-    bind_top_down(lower, upper, kwargs);
+) -> PyResult<()> {
+    bind_bottom_up(lower, upper, kwargs.clone())?;
+    bind_top_down(lower, upper, kwargs)?;
+    Ok(())
 }
 
 /*
- * Module definition into the Python world
+ * Add module definition into the Python world
  */
 
 #[pymodule]

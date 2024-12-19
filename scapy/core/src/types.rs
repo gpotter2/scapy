@@ -12,8 +12,7 @@ use std::convert::TryInto;
 // to unpack that f****** enum.
 
 #[pyclass]
-#[derive(Clone, Debug)]
-#[derive(IntoPyObjectRef)]
+#[derive(Clone, Debug, IntoPyObjectRef)]
 pub enum InternalType {
     Byte(u8),
     SignedByte(i8),
@@ -136,8 +135,6 @@ impl InternalType {
         }
     }
 }
-
-
 
 // Try to be a bit smart: this implements all casting of InternalTypes using a macro...
 
