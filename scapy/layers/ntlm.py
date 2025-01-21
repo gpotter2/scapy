@@ -237,7 +237,6 @@ class _NTLMPayloadPacket(Packet):
     def __init__(
         self,
         _pkt=b"",  # type: Union[bytes, bytearray]
-        post_transform=None,  # type: Any
         _internal=0,  # type: int
         _underlayer=None,  # type: Optional[Packet]
         _parent=None,  # type: Optional[Packet]
@@ -251,7 +250,6 @@ class _NTLMPayloadPacket(Packet):
         }
         super(_NTLMPayloadPacket, self).__init__(
             _pkt=_pkt,
-            post_transform=post_transform,
             _internal=_internal,
             _underlayer=_underlayer,
             _parent=_parent,

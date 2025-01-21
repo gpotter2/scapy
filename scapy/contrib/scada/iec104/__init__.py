@@ -427,11 +427,10 @@ class IEC104_I_Message(IEC104_APDU):
 
     fields_desc = []
 
-    def __init__(self, _pkt=b"", post_transform=None, _internal=0,
+    def __init__(self, _pkt=b"", _internal=0,
                  _underlayer=None, **fields):
 
         super(IEC104_I_Message, self).__init__(_pkt=_pkt,
-                                               post_transform=post_transform,
                                                _internal=_internal,
                                                _underlayer=_underlayer,
                                                **fields)

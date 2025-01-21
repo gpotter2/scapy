@@ -26,23 +26,51 @@ from enum import Enum
 
 from scapy.config import conf
 from scapy.dadict import DADict
-from scapy.volatile import RandBin, RandByte, RandEnumKeys, RandInt, \
-    RandIP, RandIP6, RandLong, RandMAC, RandNum, RandShort, RandSInt, \
-    RandSByte, RandTermString, RandUUID, VolatileValue, RandSShort, \
-    RandSLong, RandFloat
+from scapy.volatile import (
+    RandBin,
+    RandByte,
+    RandEnumKeys,
+    RandFloat,
+    RandInt,
+    RandIP,
+    RandIP6,
+    RandLong,
+    RandMAC,
+    RandNum,
+    RandSByte,
+    RandShort,
+    RandSInt,
+    RandSLong,
+    RandSShort,
+    RandTermString,
+    RandUUID,
+    VolatileValue,
+)
 from scapy.data import EPOCH
 from scapy.error import log_runtime, Scapy_Exception
 from scapy.compat import bytes_hex, plain_str, raw, bytes_encode
 from scapy.pton_ntop import inet_ntop, inet_pton
 from scapy.utils import inet_aton, inet_ntoa, lhex, mac2str, str2mac, EDecimal
-from scapy.utils6 import in6_6to4ExtractAddr, in6_isaddr6to4, \
-    in6_isaddrTeredo, in6_ptop, Net6, teredoAddrExtractInfo
+from scapy.utils6 import (
+    in6_6to4ExtractAddr,
+    in6_isaddr6to4,
+    in6_isaddrTeredo,
+    in6_ptop,
+    Net6,
+    teredoAddrExtractInfo,
+)
 from scapy.base_classes import (
     _ScopedIP,
     BasePacket,
     Field_metaclass,
     Net,
     ScopedIP,
+)
+
+# Rust imports
+from scapy.core import (
+    packet as rs_packet,
+    fields as rs_fields,
 )
 
 # Typing imports
@@ -141,21 +169,45 @@ class ObservableDict(Dict[int, str]):
 I = TypeVar('I')  # Internal storage  # noqa: E741
 M = TypeVar('M')  # Machine storage
 
-
-class Field(Generic[I, M], metaclass=Field_metaclass):
+class BaseField:
     """
-    For more information on how this works, please refer to the
-    'Adding new protocols' chapter in the online documentation:
-
-    https://scapy.readthedocs.io/en/stable/build_dissect.html
+    A BaseField is a Scapy field. It can be either a RustField or a PythonField (alias Field)
     """
+
+    def h2i(self, pkt, x):
+        # type: (Optional[Packet], Any) -> I
+        """Convert human value to internal value"""
+        return cast(I, x)
+
+    def i2h(self, pkt, x):
+        # type: (Optional[Packet], I) -> Any
+        """Convert internal value to human value"""
+        return x
+
+
+class RustField(BaseField):
+    """
+    A RustField is a Field implemented in Rust.
+    """
+    rs_class = None
+
+    def __init__(self, name: str, default: Any) -> None:
+        self.rs_field = self.rs_class.new(name, default)
+
+    def __getattr__(self, attr):
+        return getattr(self.rs_field, attr)
+
+
+class PythonField(Generic[I, M], BaseField, metaclass=Field_metaclass):
     __slots__ = [
         "name",
         "fmt",
         "default",
         "sz",
         "owners",
-        "struct"
+        "struct",
+        # Rust Field proxy
+        "rs_field",
     ]
     islist = 0
     ismutable = False
@@ -174,6 +226,8 @@ class Field(Generic[I, M], metaclass=Field_metaclass):
         self.default = self.any2i(None, default)
         self.sz = struct.calcsize(self.fmt)  # type: int
         self.owners = []  # type: List[Type[Packet]]
+        # Create Rust redirector
+        self.rs_field = rs_fields.PythonField.new(pyfld=self)
 
     def register_owner(self, cls):
         # type: (Type[Packet]) -> None
@@ -194,16 +248,6 @@ class Field(Generic[I, M], metaclass=Field_metaclass):
         """Convert internal value to a number of elements usable by a FieldLenField.
         Always 1 except for list fields"""
         return 1
-
-    def h2i(self, pkt, x):
-        # type: (Optional[Packet], Any) -> I
-        """Convert human value to internal value"""
-        return cast(I, x)
-
-    def i2h(self, pkt, x):
-        # type: (Optional[Packet], I) -> Any
-        """Convert internal value to human value"""
-        return x
 
     def m2i(self, pkt, x):
         # type: (Optional[Packet], M) -> I
@@ -304,6 +348,10 @@ class Field(Generic[I, M], metaclass=Field_metaclass):
                     self.name, self.fmt
                 )
             )
+
+
+# Compatibility with previous Scapy
+Field = PythonField
 
 
 class _FieldContainer(object):
@@ -1046,10 +1094,8 @@ class DestIP6Field(IP6Field, DestField):
         return super(DestIP6Field, self).i2h(pkt, x)
 
 
-class ByteField(Field[int, int]):
-    def __init__(self, name, default):
-        # type: (str, Optional[int]) -> None
-        Field.__init__(self, name, default, "B")
+class ByteField(RustField):
+    rs_class = rs_fields.ByteField
 
 
 class XByteField(ByteField):

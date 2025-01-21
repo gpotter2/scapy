@@ -28,6 +28,9 @@ import scapy
 from scapy.error import Scapy_Exception
 from scapy.consts import WINDOWS
 
+# Rust import
+from scapy.core import packet as rs_packet
+
 from typing import (
     Any,
     Dict,
@@ -408,6 +411,15 @@ class Packet_metaclass(type):
                 final_fld.append(f)
 
             dct["fields_desc"] = final_fld
+
+        # Build Rust inner packet
+        dct["rs_packetclass"] = rs_packet.PacketClassProxy(
+            name,
+            fields_desc = [
+                x.rs_field
+                for x in resolved_fld
+            ]
+        )
 
         dct.setdefault("__slots__", [])
         for attr in ["name", "overload_fields"]:

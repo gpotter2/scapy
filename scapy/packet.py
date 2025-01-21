@@ -85,15 +85,18 @@ class Packet(
     metaclass=Packet_metaclass
 ):
     __slots__ = [
+        # The underlying rust packet
+        "rs_packet",
+        # Python values
         "time", "sent_time", "name",
-        "default_fields", "fields", "fieldtype",
+        "default_fields", "fieldtype",
         "overload_fields", "overloaded_fields",
         "packetfields",
         "original", "explicit", "raw_packet_cache",
-        "raw_packet_cache_fields", "_pkt", "post_transforms",
+        "raw_packet_cache_fields", "_pkt",
         "stop_dissection_after",
         # then payload, underlayer and parent
-        "payload", "underlayer", "parent",
+        "underlayer", "parent",
         "name",
         # used for sr()
         "_answered",
@@ -112,11 +115,6 @@ class Packet(
     show_indent = 1
     show_summary = True
     match_subclass = False
-    class_dont_cache = {}  # type: Dict[Type[Packet], bool]
-    class_packetfields = {}  # type: Dict[Type[Packet], Any]
-    class_default_fields = {}  # type: Dict[Type[Packet], Dict[str, Any]]
-    class_default_fields_ref = {}  # type: Dict[Type[Packet], List[str]]
-    class_fieldtype = {}  # type: Dict[Type[Packet], Dict[str, AnyField]]  # noqa: E501
 
     @classmethod
     def from_hexcap(cls):
@@ -147,7 +145,6 @@ class Packet(
 
     def __init__(self,
                  _pkt=b"",  # type: Union[bytes, bytearray]
-                 post_transform=None,  # type: Any
                  _internal=0,  # type: int
                  _underlayer=None,  # type: Optional[Packet]
                  _parent=None,  # type: Optional[Packet]
@@ -160,59 +157,70 @@ class Packet(
         self.name = (self.__class__.__name__
                      if self._name is None else
                      self._name)
-        self.default_fields = {}  # type: Dict[str, Any]
-        self.overload_fields = self._overload_fields
-        self.overloaded_fields = {}  # type: Dict[str, Any]
-        self.fields = {}  # type: Dict[str, Any]
         self.fieldtype = {}  # type: Dict[str, AnyField]
         self.packetfields = []  # type: List[AnyField]
-        self.payload = NoPayload()  # type: Packet
-        self.init_fields(bool(_pkt))
         self.underlayer = _underlayer
         self.parent = _parent
-        if isinstance(_pkt, bytearray):
-            _pkt = bytes(_pkt)
         self.original = _pkt
         self.explicit = 0
-        self.raw_packet_cache = None  # type: Optional[bytes]
-        self.raw_packet_cache_fields = None  # type: Optional[Dict[str, Any]]  # noqa: E501
         self.wirelen = None  # type: Optional[int]
         self.direction = None  # type: Optional[int]
         self.sniffed_on = None  # type: Optional[_GlobInterfaceType]
         self.comment = None  # type: Optional[bytes]
         self.process_information = None  # type: Optional[Dict[str, Any]]
         self.stop_dissection_after = stop_dissection_after
-        if _pkt:
-            self.dissect(_pkt)
-            if not _internal:
-                self.dissection_done(self)
-        # We use this strange initialization so that the fields
-        # are initialized in their declaration order.
-        # It is required to always support MultipleTypeField
-        for field in self.fields_desc:
-            fname = field.name
-            try:
-                value = fields.pop(fname)
-            except KeyError:
-                continue
-            self.fields[fname] = value if isinstance(value, RawVal) else \
-                self.get_field(fname).any2i(self, value)
-        # The remaining fields are unknown
-        for fname in fields:
-            if fname in self.deprecated_fields:
-                # Resolve deprecated fields
-                value = fields[fname]
-                fname = self._resolve_alias(fname)
-                self.fields[fname] = value if isinstance(value, RawVal) else \
-                    self.get_field(fname).any2i(self, value)
-                continue
-            raise AttributeError(fname)
-        if isinstance(post_transform, list):
-            self.post_transforms = post_transform
-        elif post_transform is None:
-            self.post_transforms = []
-        else:
-            self.post_transforms = [post_transform]
+        # Start rust dissection
+        self.rs_packet = self.rs_packetclass(_pkt, **fields)
+
+    # RUST REDIRECTION
+
+    def get_field(self, fld: str) -> AnyField:
+        return self.rs_packet.get_field(fld)
+
+    def getfieldval(self, attr: str) -> Any:
+        return self.rs_packet.getfieldval(attr)
+
+    def setfieldval(self, attr: str, val: Any) -> None:
+        self.rs_packet.setfieldval(attr, val)
+
+    def delfieldval(self, attr: str)-> None:
+        self.rs_packet.delfieldval(attr)
+
+    def getfield_and_val(self, attr: str) -> Tuple[AnyField, Any]:
+        return self.rs_packet.getfield_and_val(attr)
+
+    def add_payload(self, payload):
+        # type: (Union[Packet, bytes]) -> None
+        self.rs_packet.add_payload(payload)
+
+    def remove_payload(self) -> None:
+        self.rs_packet.remove_payload()
+
+    def do_dissect_payload(self, s: bytes) -> None:
+        self.rs_packet.do_dissect_payload(s)
+
+    def dissect(self, s: bytes) -> None:
+        self.rs_packet.dissect(s)
+
+    def build(self) -> bytes:
+        return self.rs_packet.build()
+
+    def guess_payload_class(self, payload):
+        # type: (bytes) -> Type[Packet]
+        return self.rs_packet.guess_payload_class(payload)
+
+    @property
+    def fields(self):
+        return self.rs_packet.fields
+
+    @property
+    def payload(self):
+        return self.rs_packet.payload
+
+    def __getattr__(self, attr: str) -> Any:
+        return self.rs_packet.getattr(attr)
+
+    # PYTHON
 
     _PickleType = Tuple[
         Union[EDecimal, float],
@@ -253,107 +261,6 @@ class Packet(
         """Used by copy.deepcopy"""
         return self.copy()
 
-    def init_fields(self, for_dissect_only=False):
-        # type: (bool) -> None
-        """
-        Initialize each fields of the fields_desc dict
-        """
-
-        if self.class_dont_cache.get(self.__class__, False):
-            self.do_init_fields(self.fields_desc)
-        else:
-            self.do_init_cached_fields(for_dissect_only=for_dissect_only)
-
-    def do_init_fields(self,
-                       flist,  # type: Sequence[AnyField]
-                       ):
-        # type: (...) -> None
-        """
-        Initialize each fields of the fields_desc dict
-        """
-        default_fields = {}
-        for f in flist:
-            default_fields[f.name] = copy.deepcopy(f.default)
-            self.fieldtype[f.name] = f
-            if f.holds_packets:
-                self.packetfields.append(f)
-        # We set default_fields last to avoid race issues
-        self.default_fields = default_fields
-
-    def do_init_cached_fields(self, for_dissect_only=False):
-        # type: (bool) -> None
-        """
-        Initialize each fields of the fields_desc dict, or use the cached
-        fields information
-        """
-
-        cls_name = self.__class__
-
-        # Build the fields information
-        if Packet.class_default_fields.get(cls_name, None) is None:
-            self.prepare_cached_fields(self.fields_desc)
-
-        # Use fields information from cache
-        default_fields = Packet.class_default_fields.get(cls_name, None)
-        if default_fields:
-            self.default_fields = default_fields
-            self.fieldtype = Packet.class_fieldtype[cls_name]
-            self.packetfields = Packet.class_packetfields[cls_name]
-
-            # Optimization: no need for references when only dissecting.
-            if for_dissect_only:
-                return
-
-            # Deepcopy default references
-            for fname in Packet.class_default_fields_ref[cls_name]:
-                value = self.default_fields[fname]
-                try:
-                    self.fields[fname] = value.copy()
-                except AttributeError:
-                    # Python 2.7 - list only
-                    self.fields[fname] = value[:]
-
-    def prepare_cached_fields(self, flist):
-        # type: (Sequence[AnyField]) -> None
-        """
-        Prepare the cached fields of the fields_desc dict
-        """
-
-        cls_name = self.__class__
-
-        # Fields cache initialization
-        if not flist:
-            return
-
-        class_default_fields = dict()
-        class_default_fields_ref = list()
-        class_fieldtype = dict()
-        class_packetfields = list()
-
-        # Fields initialization
-        for f in flist:
-            if isinstance(f, MultipleTypeField):
-                # Abort
-                self.class_dont_cache[cls_name] = True
-                self.do_init_fields(self.fields_desc)
-                return
-
-            class_default_fields[f.name] = copy.deepcopy(f.default)
-            class_fieldtype[f.name] = f
-            if f.holds_packets:
-                class_packetfields.append(f)
-
-            # Remember references
-            if isinstance(f.default, (list, dict, set, RandField, Packet)):
-                class_default_fields_ref.append(f.name)
-
-        # Apply
-        Packet.class_default_fields_ref[cls_name] = class_default_fields_ref
-        Packet.class_fieldtype[cls_name] = class_fieldtype
-        Packet.class_packetfields[cls_name] = class_packetfields
-        # Last to avoid racing issues
-        Packet.class_default_fields[cls_name] = class_default_fields
-
     def dissection_done(self, pkt):
         # type: (Packet) -> None
         """DEV: will be called after a dissection is completed"""
@@ -364,36 +271,6 @@ class Packet(
         # type: (Packet) -> None
         """DEV: is called after the dissection of the whole packet"""
         pass
-
-    def get_field(self, fld):
-        # type: (str) -> AnyField
-        """DEV: returns the field instance from the name of the field"""
-        return self.fieldtype[fld]
-
-    def add_payload(self, payload):
-        # type: (Union[Packet, bytes]) -> None
-        if payload is None:
-            return
-        elif not isinstance(self.payload, NoPayload):
-            self.payload.add_payload(payload)
-        else:
-            if isinstance(payload, Packet):
-                self.payload = payload
-                payload.add_underlayer(self)
-                for t in self.aliastypes:
-                    if t in payload.overload_fields:
-                        self.overloaded_fields = payload.overload_fields[t]
-                        break
-            elif isinstance(payload, (bytes, str, bytearray, memoryview)):
-                self.payload = conf.raw_layer(load=bytes_encode(payload))
-            else:
-                raise TypeError("payload must be 'Packet', 'bytes', 'str', 'bytearray', or 'memoryview', not [%s]" % repr(payload))  # noqa: E501
-
-    def remove_payload(self):
-        # type: () -> None
-        self.payload.remove_underlayer(self)
-        self.payload = NoPayload()
-        self.overloaded_fields = {}
 
     def add_underlayer(self, underlayer):
         # type: (Packet) -> None
@@ -420,9 +297,6 @@ class Packet(
     def copy(self) -> Self:
         """Returns a deep copy of the instance."""
         clone = self.__class__()
-        clone.fields = self.copy_fields_dict(self.fields)
-        clone.default_fields = self.copy_fields_dict(self.default_fields)
-        clone.overloaded_fields = self.overloaded_fields.copy()
         clone.underlayer = self.underlayer
         clone.parent = self.parent
         clone.explicit = self.explicit
@@ -431,13 +305,13 @@ class Packet(
             self.raw_packet_cache_fields
         )
         clone.wirelen = self.wirelen
-        clone.post_transforms = self.post_transforms[:]
         clone.payload = self.payload.copy()
         clone.payload.add_underlayer(clone)
         clone.time = self.time
         clone.comment = self.comment
         clone.direction = self.direction
         clone.sniffed_on = self.sniffed_on
+        clone.rs_packet = self.rs_packet.clone()
         return clone
 
     def _resolve_alias(self, attr):
@@ -450,62 +324,6 @@ class Packet(
         )
         return new_attr
 
-    def getfieldval(self, attr):
-        # type: (str) -> Any
-        if self.deprecated_fields and attr in self.deprecated_fields:
-            attr = self._resolve_alias(attr)
-        if attr in self.fields:
-            return self.fields[attr]
-        if attr in self.overloaded_fields:
-            return self.overloaded_fields[attr]
-        if attr in self.default_fields:
-            return self.default_fields[attr]
-        return self.payload.getfieldval(attr)
-
-    def getfield_and_val(self, attr):
-        # type: (str) -> Tuple[AnyField, Any]
-        if self.deprecated_fields and attr in self.deprecated_fields:
-            attr = self._resolve_alias(attr)
-        if attr in self.fields:
-            return self.get_field(attr), self.fields[attr]
-        if attr in self.overloaded_fields:
-            return self.get_field(attr), self.overloaded_fields[attr]
-        if attr in self.default_fields:
-            return self.get_field(attr), self.default_fields[attr]
-        raise ValueError
-
-    def __getattr__(self, attr):
-        # type: (str) -> Any
-        try:
-            fld, v = self.getfield_and_val(attr)
-        except ValueError:
-            return self.payload.__getattr__(attr)
-        if fld is not None:
-            return v if isinstance(v, RawVal) else fld.i2h(self, v)
-        return v
-
-    def setfieldval(self, attr, val):
-        # type: (str, Any) -> None
-        if self.deprecated_fields and attr in self.deprecated_fields:
-            attr = self._resolve_alias(attr)
-        if attr in self.default_fields:
-            fld = self.get_field(attr)
-            if fld is None:
-                any2i = lambda x, y: y  # type: Callable[..., Any]
-            else:
-                any2i = fld.any2i
-            self.fields[attr] = val if isinstance(val, RawVal) else \
-                any2i(self, val)
-            self.explicit = 0
-            self.raw_packet_cache = None
-            self.raw_packet_cache_fields = None
-            self.wirelen = None
-        elif attr == "payload":
-            self.remove_payload()
-            self.add_payload(val)
-        else:
-            self.payload.setfieldval(attr, val)
-
     def __setattr__(self, attr, val):
         # type: (str, Any) -> None
         if attr in self.__all_slots__:
@@ -515,21 +333,6 @@ class Packet(
         except AttributeError:
             pass
         return object.__setattr__(self, attr, val)
-
-    def delfieldval(self, attr):
-        # type: (str) -> None
-        if attr in self.fields:
-            del self.fields[attr]
-            self.explicit = 0  # in case a default value must be explicit
-            self.raw_packet_cache = None
-            self.raw_packet_cache_fields = None
-            self.wirelen = None
-        elif attr in self.default_fields:
-            pass
-        elif attr == "payload":
-            self.remove_payload()
-        else:
-            self.payload.delfieldval(attr)
 
     def __delattr__(self, attr):
         # type: (str) -> None
@@ -689,86 +492,6 @@ class Packet(
                     for fsubval in fval:
                         fsubval.clear_cache()
         self.payload.clear_cache()
-
-    def self_build(self):
-        # type: () -> bytes
-        """
-        Create the default layer regarding fields_desc dict
-
-        :param field_pos_list:
-        """
-        if self.raw_packet_cache is not None and \
-                self.raw_packet_cache_fields is not None:
-            for fname, fval in self.raw_packet_cache_fields.items():
-                fld, val = self.getfield_and_val(fname)
-                if self._raw_packet_cache_field_value(fld, val) != fval:
-                    self.raw_packet_cache = None
-                    self.raw_packet_cache_fields = None
-                    self.wirelen = None
-                    break
-            if self.raw_packet_cache is not None:
-                return self.raw_packet_cache
-        p = b""
-        for f in self.fields_desc:
-            val = self.getfieldval(f.name)
-            if isinstance(val, RawVal):
-                p += bytes(val)
-            else:
-                try:
-                    p = f.addfield(self, p, val)
-                except Exception as ex:
-                    try:
-                        ex.args = (
-                            "While dissecting field '%s': " % f.name +
-                            ex.args[0],
-                        ) + ex.args[1:]
-                    except (AttributeError, IndexError):
-                        pass
-                    raise ex
-        return p
-
-    def do_build_payload(self):
-        # type: () -> bytes
-        """
-        Create the default version of the payload layer
-
-        :return: a string of payload layer
-        """
-        return self.payload.do_build()
-
-    def do_build(self):
-        # type: () -> bytes
-        """
-        Create the default version of the layer
-
-        :return: a string of the packet with the payload
-        """
-        if not self.explicit:
-            self = next(iter(self))
-        pkt = self.self_build()
-        for t in self.post_transforms:
-            pkt = t(pkt)
-        pay = self.do_build_payload()
-        if self.raw_packet_cache is None:
-            return self.post_build(pkt, pay)
-        else:
-            return pkt + pay
-
-    def build_padding(self):
-        # type: () -> bytes
-        return self.payload.build_padding()
-
-    def build(self):
-        # type: () -> bytes
-        """
-        Create the current layer
-
-        :return: string of the packet with the payload
-        """
-        p = self.do_build()
-        p += self.build_padding()
-        p = self.build_done(p)
-        return p
 
     def post_build(self, pkt, pay):
         # type: (bytes, bytes) -> bytes
@@ -1014,101 +737,6 @@ class Packet(
         """DEV: is called right before the current layer is dissected"""
         return s
 
-    def do_dissect(self, s):
-        # type: (bytes) -> bytes
-        _raw = s
-        self.raw_packet_cache_fields = {}
-        for f in self.fields_desc:
-            s, fval = f.getfield(self, s)
-            # Skip unused ConditionalField
-            if isinstance(f, ConditionalField) and fval is None:
-                continue
-            # We need to track fields with mutable values to discard
-            # .raw_packet_cache when needed.
-            if (f.islist or f.holds_packets or f.ismutable) and fval is not None:
-                self.raw_packet_cache_fields[f.name] = \
-                    self._raw_packet_cache_field_value(f, fval, copy=True)
-            self.fields[f.name] = fval
-            # Nothing left to dissect
-            if not s and (isinstance(f, MayEnd) or
-                          (fval is not None and isinstance(f, ConditionalField) and
-                           isinstance(f.fld, MayEnd))):
-                break
-        self.raw_packet_cache = _raw[:-len(s)] if s else _raw
-        self.explicit = 1
-        return s
-
-    def do_dissect_payload(self, s):
-        # type: (bytes) -> None
-        """
-        Perform the dissection of the layer's payload
-
-        :param str s: the raw layer
-        """
-        if s:
-            if (
-                self.stop_dissection_after and
-                isinstance(self, self.stop_dissection_after)
-            ):
-                # stop dissection here
-                p = conf.raw_layer(s, _internal=1, _underlayer=self)
-                self.add_payload(p)
-                return
-            cls = self.guess_payload_class(s)
-            try:
-                p = cls(
-                    s,
-                    stop_dissection_after=self.stop_dissection_after,
-                    _internal=1,
-                    _underlayer=self,
-                )
-            except KeyboardInterrupt:
-                raise
-            except Exception:
-                if conf.debug_dissector:
-                    if issubtype(cls, Packet):
-                        log_runtime.error("%s dissector failed", cls.__name__)
-                    else:
-                        log_runtime.error("%s.guess_payload_class() returned "
-                                          "[%s]",
-                                          self.__class__.__name__, repr(cls))
-                    if cls is not None:
-                        raise
-                p = conf.raw_layer(s, _internal=1, _underlayer=self)
-            self.add_payload(p)
-
-    def dissect(self, s):
-        # type: (bytes) -> None
-        s = self.pre_dissect(s)
-
-        s = self.do_dissect(s)
-
-        s = self.post_dissect(s)
-
-        payl, pad = self.extract_padding(s)
-        self.do_dissect_payload(payl)
-        if pad and conf.padding:
-            self.add_payload(conf.padding_layer(pad))
-
-    def guess_payload_class(self, payload):
-        # type: (bytes) -> Type[Packet]
-        """
-        DEV: Guesses the next payload class from layer bonds.
-        Can be overloaded to use a different mechanism.
-
-        :param str payload: the layer's payload
-        :return: the payload class
-        """
-        for t in self.aliastypes:
-            for fval, cls in t.payload_guess:
-                try:
-                    if all(v == self.getfieldval(k)
-                           for k, v in fval.items()):
-                        return cls  # type: ignore
-                except AttributeError:
-                    pass
-        return self.default_payload_class(payload)
-
     def default_payload_class(self, payload):
         # type: (bytes) -> Type[Packet]
         """
@@ -1141,7 +769,6 @@ class Packet(
         pkt.time = self.time
         pkt.underlayer = self.underlayer
         pkt.parent = self.parent
-        pkt.post_transforms = self.post_transforms
         pkt.raw_packet_cache = self.raw_packet_cache
         pkt.raw_packet_cache_fields = self.copy_fields_dict(
             self.raw_packet_cache_fields
@@ -1754,9 +1381,9 @@ values.
                     if isinstance(fv, bytes):
                         fv = fv.decode("utf-8", errors="backslashreplace")
                     else:
-                        fv = fld.i2h(self, fv)
+                        fv = fld.i2h(self.rs_packet, fv)
                 else:
-                    fv = repr(fld.i2h(self, fv))
+                    fv = repr(fld.i2h(self.rs_packet, fv))
             f.append((fn, fv))
         return f
 
@@ -1878,10 +1505,6 @@ class NoPayload(Packet):
         return b"", []
 
     def getfieldval(self, attr):
-        # type: (str) -> NoReturn
-        raise AttributeError(attr)
-
-    def getfield_and_val(self, attr):
         # type: (str) -> NoReturn
         raise AttributeError(attr)
 
@@ -2007,10 +1630,6 @@ class Raw(Packet):
 
 class Padding(Raw):
     name = "Padding"
-
-    def self_build(self, field_pos_list=None):
-        # type: (Optional[Any]) -> bytes
-        return b""
 
     def build_padding(self):
         # type: () -> bytes

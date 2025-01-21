@@ -278,10 +278,9 @@ class _SpecificRadiusAttr(RadiusAttribute):
     __slots__ = ["val"]
     match_subclass = True
 
-    def __init__(self, _pkt="", post_transform=None, _internal=0, _underlayer=None, **fields):  # noqa: E501
+    def __init__(self, _pkt="", _internal=0, _underlayer=None, **fields):  # noqa: E501
         super(_SpecificRadiusAttr, self).__init__(
             _pkt,
-            post_transform,
             _internal,
             _underlayer,
             **fields
@@ -493,10 +492,9 @@ class _RadiusAttrHexStringVal(_SpecificRadiusAttr):
 
     __slots__ = ["val"]
 
-    def __init__(self, _pkt="", post_transform=None, _internal=0, _underlayer=None, **fields):  # noqa: E501
+    def __init__(self, _pkt="", _internal=0, _underlayer=None, **fields):  # noqa: E501
         super(_RadiusAttrHexStringVal, self).__init__(
             _pkt,
-            post_transform,
             _internal,
             _underlayer,
             **fields

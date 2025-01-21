@@ -24,7 +24,7 @@ __all__ = [
     "BIG_ENDIAN",
 ]
 
-LINUX = platform.startswith("linux")
+LINUX = False #platform.startswith("linux")
 OPENBSD = platform.startswith("openbsd")
 FREEBSD = "freebsd" in platform
 NETBSD = platform.startswith("netbsd")

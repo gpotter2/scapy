@@ -1,3 +1,10 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * This file is part of Scapy
+ * See https://scapy.net/ for more information
+ * Copyright (C) Gabriel Potter
+ */
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -9,6 +16,9 @@ use crate::types;
 
 /*
  * FieldTrait is the common trait that defines the behavior of Fields.
+ * For more information on how this works, please refer to the
+ * 'Adding new protocols' chapter in the online documentation:
+ * https://scapy.readthedocs.io/en/stable/build_dissect.html
  */
 
 pub trait FieldTrait {
@@ -188,6 +198,7 @@ macro_rules! Field {
             ) -> Result<Vec<u8>, PyErr> {
                 FieldTrait::addfield(self, pkt, s, &val)
             }
+            #[pyo3(signature=(pkt, x))]
             pub fn getfield<'a>(
                 &self,
                 pkt: &packet::Packet,
@@ -195,6 +206,10 @@ macro_rules! Field {
             ) -> Result<(Vec<u8>, types::InternalType), PyErr> {
                 FieldTrait::getfield(self, pkt, Cow::Borrowed(x))
                     .map(|(cow, internal)| (cow.into_owned(), internal))
+            }
+            #[getter]
+            pub fn name(&self) -> &str {
+                return stringify!($pyname);
             }
         }
     };
@@ -533,10 +548,36 @@ impl FieldType {
 #[pyclass]
 #[derive(Clone)]
 pub struct FieldProxy {
+    #[pyo3(get)]
     pub name: String,
+    #[pyo3(get)]
     pub default: Option<types::InternalType>,
+    #[pyo3(get)]
     pub sz: usize,
     pub fieldtype: FieldType,
+}
+
+#[pymethods]
+impl FieldProxy {
+    #[pyo3(signature = (_pkt, x))]
+    pub fn i2h(
+        &self,
+        _pkt: &packet::Packet,
+        x: Option<&types::InternalType>,
+    ) -> PyResult<Py<PyAny>> {
+        Python::with_gil(|py| match x {
+            Some(x) => x.to_object(py),
+            None => Ok(py.None()),
+        })
+    }
+    #[pyo3(signature = (pkt, x))]
+    pub fn h2i<'py>(
+        &self,
+        pkt: Option<&packet::Packet>,
+        x: Option<&Bound<'py, PyAny>>,
+    ) -> Result<types::InternalType, PyErr> {
+        self.fieldtype.as_trait().any2i(pkt, &x)
+    }
 }
 
 /*

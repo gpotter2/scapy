@@ -1,4 +1,11 @@
-use pyo3::exceptions::PyAttributeError;
+/*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * This file is part of Scapy
+ * See https://scapy.net/ for more information
+ * Copyright (C) Gabriel Potter
+ */
+
+use pyo3::exceptions::{PyAttributeError, PyKeyError};
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use std::borrow::Cow;
@@ -36,7 +43,7 @@ struct PacketClass {
 }
 
 impl PacketClass {
-    pub fn get_field(&self, attr: &String) -> PyResult<FieldProxy> {
+    pub fn get_field(&self, attr: &str) -> PyResult<FieldProxy> {
         match self.fields_desc.iter().find(|f| &f.name == attr) {
             Some(x) => Ok(x.clone()),
             _ => Err(PyAttributeError::new_err("Unknown field name (get_field)")),
@@ -206,7 +213,7 @@ impl Packet {
     /*
      * Return a proxy to the field object based on it's name.
      */
-    fn _get_field(&self, attr: &String) -> PyResult<FieldProxy> {
+    fn _get_field(&self, attr: &str) -> PyResult<FieldProxy> {
         self.proxy.get_class().lock().unwrap().get_field(attr)
     }
 
@@ -214,7 +221,7 @@ impl Packet {
      * Get / Set an internal field's value.
      */
 
-    fn _getfieldval(&self, attr: &String) -> PyResult<Option<&types::InternalType>> {
+    fn _getfieldval(&self, attr: &str) -> PyResult<Option<&types::InternalType>> {
         if self.fields.contains_key(attr) {
             return Ok(self.fields.get(attr).unwrap().as_ref());
         } else if self.overloaded_fields.contains_key(attr) {
@@ -304,6 +311,15 @@ impl Packet {
 #[pymethods]
 impl Packet {
     /*
+     * Proxies back fields_desc. This shouldn't be used in a hotpath, but rather for
+     * display-like functions (show, etc.)
+     */
+    #[getter]
+    fn fields_desc(&self) -> FieldList {
+        self.proxy.get_class().lock().unwrap().fields_desc.clone()
+    }
+
+    /*
      * This method guesses the class of the payload based on its current fields.
      */
     pub fn guess_payload_class(&self, _s: &[u8]) -> PyResult<PacketClassProxy> {
@@ -391,6 +407,7 @@ impl Packet {
             }
         }
     }
+
     fn remove_payload(&mut self) {
         self.payload = None;
         self.overloaded_fields.clear();
@@ -421,7 +438,7 @@ impl Packet {
     /*
      * Return a proxy to the field object based on it's name.
      */
-    fn get_field(&self, attr: String) -> PyResult<FieldProxy> {
+    fn get_field(&self, attr: &str) -> PyResult<FieldProxy> {
         self._get_field(&attr)
     }
 
@@ -429,9 +446,9 @@ impl Packet {
      * Get / Set an internal field's value.
      */
 
-    fn getfieldval(&self, attr: String) -> PyResult<Py<PyAny>> {
+    fn getfieldval(&self, attr: &str) -> PyResult<Py<PyAny>> {
         Python::with_gil(|py| {
-            if let Some(val) = self._getfieldval(&attr)? {
+            if let Some(val) = self._getfieldval(attr)? {
                 Ok(val.to_object(py)?)
             } else {
                 Ok(py.None())
@@ -457,6 +474,50 @@ impl Packet {
         };
         self.fields.insert(attr, val);
         Ok(())
+    }
+
+    #[pyo3(signature = (attr))]
+    fn delfieldval(&mut self, attr: String) -> PyResult<()> {
+        if self.fields.contains_key(&attr) {
+            match self.fields.remove(&attr) {
+                None => Err(PyKeyError::new_err("Unknown attribute !")),
+                _ => Ok(()),
+            }
+        } else if attr == "payload" {
+            self.remove_payload();
+            Ok(())
+        } else if let Some(x) = &mut self.payload {
+            (**x).delfieldval(attr)
+        } else {
+            Ok(())
+        }
+    }
+
+    /* A different wrapper of getfieldval */
+
+    fn getfield_and_val(&self, attr: &str) -> PyResult<(FieldProxy, Py<PyAny>)> {
+        self._get_field(attr)
+            .and_then(|fld| self.getfieldval(attr).and_then(|fval| Ok((fld, fval))))
+    }
+
+    /* This is the function used to get a packet attribute vie 'pkt.attr' */
+
+    fn getattr(&self, attr: &str) -> PyResult<Py<PyAny>> {
+        let fld = self._get_field(attr);
+        match fld {
+            Ok(fld) => {
+                let fval = self._getfieldval(attr)?;
+                fld.i2h(&self, fval)
+            }
+            Err(_) => {
+                // Recurse
+                if let Some(payload) = &self.payload {
+                    payload.getattr(attr)
+                } else {
+                    Err(PyAttributeError::new_err("Attribute not found"))
+                }
+            }
+        }
     }
 }
 
