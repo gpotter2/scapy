@@ -20,6 +20,11 @@ PC3 = packet.PacketClassProxy("PC3", fields_desc=[a, b])
 packet.bind_layers(PC1, PC2, pc1a=0)
 packet.bind_layers(PC1, PC3, pc1a=1)
 
+# Cross
+x = MACField("test", 0)
+a = fields.PythonField.new(pyfld=x)
+PCX = packet.PacketClassProxy("PCX", fields_desc=[a])
+
 # Python
 
 class PPC1(Packet):

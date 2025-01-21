@@ -1,6 +1,7 @@
 use pyo3::exceptions::PyAttributeError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -228,6 +229,76 @@ impl Packet {
             }
         }
     }
+
+    /*
+     * Internal function called to perform the dissection of the current Packet's fields
+     */
+
+    fn do_dissect<'a>(&mut self, mut s: Cow<'a, [u8]>) -> PyResult<Cow<'a, [u8]>> {
+        for f in &self.proxy.get_class().lock().unwrap().fields_desc {
+            let (remaining, fval) = f.fieldtype.as_trait().getfield(self, s)?;
+            self.fields.insert(f.name.clone(), Some(fval));
+            s = remaining;
+        }
+        Ok(s)
+    }
+
+    /*
+     * Internal function called to perform the dissection of the payload's fields
+     */
+
+    fn do_dissect_payload(&mut self, s: Cow<[u8]>) -> PyResult<()> {
+        if s.is_empty() {
+            Ok(())
+        } else {
+            let cls: PacketClassProxy = self.guess_payload_class(&s)?;
+            let pkt = match cls.__call__(Some(s.as_ref()), None) {
+                Ok(pkt) => pkt,
+                Err(_) => RAW.__call__(Some(s.as_ref()), None).unwrap(),
+            };
+            self.add_payload(pkt);
+            Ok(())
+        }
+    }
+
+    /*
+     * Internal function to build the bytes of the current packet
+     */
+    fn self_build(&self) -> PyResult<Vec<u8>> {
+        let mut s: Vec<u8> = Vec::new();
+        for f in &self.proxy.get_class().lock().unwrap().fields_desc {
+            s = f
+                .fieldtype
+                .as_trait()
+                .addfield(self, s, &self._getfieldval(&f.name).unwrap())?;
+        }
+        Ok(s)
+    }
+
+    /*
+     * Internal function to build the bytes of the payload
+     */
+    fn do_build_payload(&self) -> PyResult<Option<Vec<u8>>> {
+        if let Some(payload) = &self.payload {
+            Ok(Some(payload.do_build()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /*
+     * Internal function to add the padding
+     */
+    fn build_padding(&self) -> PyResult<Option<Vec<u8>>> {
+        Ok(None)
+    }
+
+    /*
+     * Internal function to return the bytes from a packet with the payload
+     */
+    fn do_build(&self) -> PyResult<Vec<u8>> {
+        self.post_build(self.self_build()?, self.do_build_payload()?)
+    }
 }
 
 #[pymethods]
@@ -266,83 +337,14 @@ impl Packet {
     }
 
     /*
-     * Internal function called to perform the dissection of the current Packet's fields
-     */
-
-    fn do_dissect<'a>(&mut self, mut s: &'a [u8]) -> PyResult<&'a [u8]> {
-        for f in &self.proxy.get_class().lock().unwrap().fields_desc {
-            let (fval, remaining) = f.fieldtype.as_trait().getfield(self, s)?;
-            self.fields.insert(f.name.clone(), Some(fval));
-            s = remaining;
-        }
-        Ok(s)
-    }
-
-    /*
-     * Internal function called to perform the dissection of the payload's fields
-     */
-
-    fn do_dissect_payload(&mut self, s: &[u8]) -> PyResult<()> {
-        if s.is_empty() {
-            Ok(())
-        } else {
-            let cls: PacketClassProxy = self.guess_payload_class(&s)?;
-            let pkt = match cls.__call__(Some(s), None) {
-                Ok(pkt) => pkt,
-                Err(_) => RAW.__call__(Some(s), None).unwrap(),
-            };
-            self.add_payload(pkt);
-            Ok(())
-        }
-    }
-
-    /*
      * Entry point for dissection.
      */
 
     pub fn dissect(&mut self, s: &[u8]) -> PyResult<()> {
-        let s = self.do_dissect(s)?;
+        let mut s = Cow::Borrowed(s);
+        s = self.do_dissect(s)?;
         self.do_dissect_payload(s)?;
         Ok(())
-    }
-
-    /*
-     * Internal function to build the bytes of the current packet
-     */
-    fn self_build(&self) -> PyResult<Vec<u8>> {
-        let mut s: Vec<u8> = Vec::new();
-        for f in &self.proxy.get_class().lock().unwrap().fields_desc {
-            s = f
-                .fieldtype
-                .as_trait()
-                .addfield(self, s, &self._getfieldval(&f.name).unwrap())?;
-        }
-        Ok(s)
-    }
-
-    /*
-     * Internal function to build the bytes of the payload
-     */
-    fn do_build_payload(&self) -> PyResult<Option<Vec<u8>>> {
-        if let Some(payload) = &self.payload {
-            Ok(Some(payload.do_build()?))
-        } else {
-            Ok(None)
-        }
-    }
-
-    /*
-     * Internal function to add the padding
-     */
-    fn build_padding(&self) -> PyResult<Option<Vec<u8>>> {
-        Ok(None)
-    }
-
-    /*
-     * Return the bytes from a packet with the payload
-     */
-    fn do_build(&self) -> PyResult<Vec<u8>> {
-        self.post_build(self.self_build()?, self.do_build_payload()?)
     }
 
     /*
@@ -361,9 +363,6 @@ impl Packet {
      */
     fn build(&self) -> PyResult<Vec<u8>> {
         let mut p = self.do_build()?;
-        if let Some(payload) = self.do_build_payload()? {
-            p.extend(payload);
-        }
         if let Some(padding) = self.build_padding()? {
             p.extend(padding);
         }
@@ -430,8 +429,14 @@ impl Packet {
      * Get / Set an internal field's value.
      */
 
-    fn getfieldval(&self, attr: String) -> PyResult<Option<&types::InternalType>> {
-        self._getfieldval(&attr)
+    fn getfieldval(&self, attr: String) -> PyResult<Py<PyAny>> {
+        Python::with_gil(|py| {
+            if let Some(val) = self._getfieldval(&attr)? {
+                Ok(val.to_object(py)?)
+            } else {
+                Ok(py.None())
+            }
+        })
     }
 
     #[pyo3(signature = (attr, val))]

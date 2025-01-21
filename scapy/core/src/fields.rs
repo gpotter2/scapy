@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use pyo3::exceptions::PyTypeError;
@@ -38,8 +39,8 @@ pub trait FieldTrait {
     fn getfield<'a>(
         &self,
         pkt: &packet::Packet,
-        x: &'a [u8],
-    ) -> Result<(types::InternalType, &'a [u8]), PyErr>;
+        x: Cow<'a, [u8]>,
+    ) -> Result<(Cow<'a, [u8]>, types::InternalType), PyErr>;
 }
 
 /*
@@ -119,18 +120,22 @@ macro_rules! Field {
             fn getfield<'a>(
                 &self,
                 pkt: &packet::Packet,
-                x: &'a [u8],
-            ) -> Result<(types::InternalType, &'a [u8]), PyErr> {
+                x: Cow<'a, [u8]>,
+            ) -> Result<(Cow<'a, [u8]>, types::InternalType), PyErr> {
+                let val = self.m2i(
+                    pkt,
+                    if $leendian {
+                        types::MachineType::$i(<$m>::from_le_bytes(x[..self.sz].try_into()?))
+                    } else {
+                        types::MachineType::$i(<$m>::from_be_bytes(x[..self.sz].try_into()?))
+                    },
+                )?;
                 Ok((
-                    self.m2i(
-                        pkt,
-                        if $leendian {
-                            types::MachineType::$i(<$m>::from_le_bytes(x[..self.sz].try_into()?))
-                        } else {
-                            types::MachineType::$i(<$m>::from_be_bytes(x[..self.sz].try_into()?))
-                        },
-                    )?,
-                    &x[self.sz..],
+                    match x {
+                        Cow::Borrowed(x) => Cow::Borrowed(&x[self.sz..]),
+                        Cow::Owned(x) => Cow::Owned(x[self.sz..].to_vec()),
+                    },
+                    val,
                 ))
             }
         }
@@ -187,8 +192,9 @@ macro_rules! Field {
                 &self,
                 pkt: &packet::Packet,
                 x: &'a [u8],
-            ) -> Result<(types::InternalType, &'a [u8]), PyErr> {
-                FieldTrait::getfield(self, pkt, x)
+            ) -> Result<(Vec<u8>, types::InternalType), PyErr> {
+                FieldTrait::getfield(self, pkt, Cow::Borrowed(x))
+                    .map(|(cow, internal)| (cow.into_owned(), internal))
             }
         }
     };
@@ -284,9 +290,12 @@ macro_rules! _StrField {
             fn getfield<'a>(
                 &self,
                 pkt: &packet::Packet,
-                x: &'a [u8],
-            ) -> Result<(types::InternalType, &'a [u8]), PyErr> {
-                Ok((self.m2i(pkt, types::MachineType::Bytes(x.to_vec()))?, &[]))
+                x: Cow<'a, [u8]>,
+            ) -> Result<(Cow<'a, [u8]>, types::InternalType), PyErr> {
+                Ok((
+                    Cow::Borrowed(&[]),
+                    self.m2i(pkt, types::MachineType::Bytes(x.to_vec()))?,
+                ))
             }
         }
 
@@ -345,14 +354,124 @@ macro_rules! _StrField {
                 &self,
                 pkt: &packet::Packet,
                 x: &'a [u8],
-            ) -> Result<(types::InternalType, &'a [u8]), PyErr> {
-                FieldTrait::getfield(self, pkt, x)
+            ) -> Result<(Vec<u8>, types::InternalType), PyErr> {
+                FieldTrait::getfield(self, pkt, Cow::Borrowed(x))
+                    .map(|(cow, internal)| (cow.into_owned(), internal))
             }
         }
     };
 }
 
 _StrField![StrField];
+
+/*
+ * PythonField: a rust field that proxies all the methods to their Python counterparts.
+ * This is used to implement Fields in Python.
+ */
+
+#[pyclass]
+pub struct PythonField {
+    #[pyo3(get)]
+    pyfld: Py<PyAny>,
+}
+
+impl Clone for PythonField {
+    fn clone(&self) -> Self {
+        Python::with_gil(|py| Self {
+            pyfld: self.pyfld.clone_ref(py),
+        })
+    }
+}
+
+impl FieldTrait for PythonField {
+    fn init(&mut self, _kwargs: Option<HashMap<String, types::InternalType>>) -> PyResult<()> {
+        Ok(())
+    }
+
+    fn any2i<'py>(
+        &self,
+        _pkt: Option<&packet::Packet>,
+        _x: &Option<&Bound<'py, PyAny>>,
+    ) -> Result<types::InternalType, PyErr> {
+        let pkt = match _pkt {
+            Some(_pkt) => Some(_pkt.clone()),
+            None => None,
+        };
+        Python::with_gil(|py| {
+            let v = self.pyfld.call_method1(py, "any2i", (pkt, _x))?;
+            v.extract(py)
+        })
+    }
+
+    fn m2i(
+        &self,
+        _pkt: &packet::Packet,
+        _x: types::MachineType,
+    ) -> Result<types::InternalType, PyErr> {
+        Python::with_gil(|py| {
+            let v = self.pyfld.call_method1(py, "m2i", (_pkt.clone(), _x))?;
+            v.extract(py)
+        })
+    }
+
+    fn i2m(
+        &self,
+        _pkt: &packet::Packet,
+        _x: &Option<&types::InternalType>,
+    ) -> Result<types::MachineType, PyErr> {
+        Python::with_gil(|py| {
+            let v = self.pyfld.call_method1(py, "i2m", (_pkt.clone(), _x))?;
+            v.extract(py)
+        })
+    }
+
+    fn addfield(
+        &self,
+        _pkt: &packet::Packet,
+        _s: Vec<u8>,
+        _val: &Option<&types::InternalType>,
+    ) -> Result<Vec<u8>, PyErr> {
+        Python::with_gil(|py| {
+            let v = self
+                .pyfld
+                .call_method1(py, "addfield", (_pkt.clone(), _s, _val))?;
+            v.extract(py)
+        })
+    }
+
+    fn getfield<'py, 'a>(
+        &self,
+        _pkt: &packet::Packet,
+        _x: Cow<'a, [u8]>,
+    ) -> Result<(Cow<'a, [u8]>, types::InternalType), PyErr> {
+        Python::with_gil(|py| {
+            let v = self
+                .pyfld
+                .call_method1(py, "getfield", (_pkt.clone(), _x))?;
+            v.extract::<(Vec<u8>, Py<PyAny>)>(py)
+                .map(|(vec, internal)| {
+                    (
+                        Cow::Owned(vec),
+                        types::InternalType::PythonFieldValue(types::ClonablePyAny(internal)),
+                    )
+                })
+        })
+    }
+}
+
+#[pymethods]
+impl PythonField {
+    #[pyo3(signature = (pyfld))]
+    #[staticmethod]
+    pub fn new<'py>(py: Python<'py>, pyfld: Py<PyAny>) -> PyResult<FieldProxy> {
+        Ok(FieldProxy {
+            name: pyfld.getattr(py, "name")?.extract(py)?,
+            default: None,
+            sz: pyfld.getattr(py, "sz")?.extract(py)?,
+            fieldtype: FieldType::PythonField(PythonField { pyfld: pyfld }),
+        })
+    }
+}
 
 // Generic
 
@@ -378,6 +497,7 @@ pub enum FieldType {
     LESignedIntField(LESignedIntField),
     LESignedLongField(LESignedLongField),
     StrField(StrField),
+    PythonField(PythonField),
 }
 
 // Huh, I feel very dumb writing this.
@@ -400,6 +520,7 @@ impl FieldType {
             FieldType::LESignedIntField(x) => Box::new(x),
             FieldType::LESignedLongField(x) => Box::new(x),
             FieldType::StrField(x) => Box::new(x),
+            FieldType::PythonField(x) => Box::new(x),
         }
     }
 }
@@ -444,6 +565,7 @@ pub fn fields(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<LESignedShortField>()?;
     m.add_class::<LESignedIntField>()?;
     m.add_class::<LESignedLongField>()?;
+    m.add_class::<PythonField>()?;
     m.add_class::<StrField>()?;
     Ok(())
 }

@@ -7,6 +7,15 @@ use std::convert::TryInto;
  * This implements how the values are stored within Scapy.
  */
 
+#[pyclass]
+#[derive(Debug, IntoPyObjectRef)]
+pub struct ClonablePyAny(pub Py<PyAny>);
+impl Clone for ClonablePyAny {
+    fn clone(&self) -> Self {
+        Self(Python::with_gil(|py| self.0.clone_ref(py)))
+    }
+}
+
 // NOTE: This file looks extremly dumb, but I, for the love of god, could not figure out
 // how to make it look nicer. It sounds extremly dumb, but it seems rust just WAAANNNTTTSS you
 // to unpack that f****** enum.
@@ -26,6 +35,8 @@ pub enum InternalType {
     SignedLongLong(i128),
     String(String),
     Bytes(Vec<u8>),
+    // This is used in a PythonField and CANNOT be used in rust directly
+    PythonFieldValue(ClonablePyAny),
 }
 
 impl PartialEq for InternalType {
@@ -63,6 +74,7 @@ impl std::fmt::Display for InternalType {
             InternalType::SignedLongLong(x) => write!(f, "SignedLongLong({})", x),
             InternalType::String(x) => write!(f, "String({})", x),
             InternalType::Bytes(x) => write!(f, "Bytes({:?})", x),
+            InternalType::PythonFieldValue(_) => write!(f, "[Non-Rust Value]"),
         }
     }
 }
@@ -116,6 +128,9 @@ impl InternalType {
             InternalType::SignedLongLong(x) => MachineType::SignedLongLong(*x),
             InternalType::String(x) => MachineType::Bytes(x.as_bytes().to_vec()),
             InternalType::Bytes(x) => MachineType::Bytes(x.clone()),
+            InternalType::PythonFieldValue(_) => {
+                panic!("Invalid call to PythonFieldValue.as_machine !")
+            }
         }
     }
     pub fn to_object(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -132,6 +147,7 @@ impl InternalType {
             InternalType::SignedLongLong(x) => x.into_py_any(py),
             InternalType::String(x) => x.into_py_any(py),
             InternalType::Bytes(x) => x.into_py_any(py),
+            InternalType::PythonFieldValue(x) => Ok(x.0.clone_ref(py)),
         }
     }
 }

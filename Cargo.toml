@@ -1,4 +1,3 @@
 [workspace]
-members = [
-    "scapy/core",
-]
+members = [ "scapy/core" ]
+resolver = "2"
