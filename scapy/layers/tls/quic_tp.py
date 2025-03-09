@@ -5,6 +5,7 @@
 """
 RFC9000 QUIC Transport Parameters
 """
+
 import struct
 
 from scapy.config import conf
@@ -15,7 +16,7 @@ from scapy.fields import (
 )
 from scapy.packet import Packet
 
-from scapy.layers.quic import (
+from scapy.layers.quic.basefields import (
     QuicVarIntField,
     QuicVarLenField,
     QuicVarEnumField,

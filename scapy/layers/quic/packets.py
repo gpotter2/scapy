@@ -4,31 +4,20 @@
 # Copyright (C) Gabriel Potter <gabriel[]potter[]fr>
 
 """
-QUIC
-
-The draft of a very basic implementation of the structures from [RFC 9000].
-This isn't binded to UDP by default as currently too incomplete.
-
-TODO:
-- payloads.
-- encryption.
-- automaton.
-- etc.
+QUIC Packet formats per RFC9000 sect 17
 """
 
 import struct
 
 from scapy.packet import (
     Packet,
+    bind_bottom_up,
+    bind_layers,
 )
 from scapy.fields import (
-    _EnumField,
     BitEnumField,
     BitField,
-    ByteEnumField,
     ByteField,
-    EnumField,
-    Field,
     FieldLenField,
     FieldListField,
     IntField,
@@ -37,91 +26,13 @@ from scapy.fields import (
     StrLenField,
     ThreeBytesField,
 )
+from scapy.layers.inet import UDP
 
-# Typing imports
-from typing import (
-    Any,
-    Optional,
-    Tuple,
+from scapy.layers.quic.basefields import (
+    QuicVarIntField,
+    QuicVarLenField,
 )
-
-# RFC9000 table 3
-_quic_payloads = {
-    0x00: "PADDING",
-    0x01: "PING",
-    0x02: "ACK",
-    0x04: "RESET_STREAM",
-    0x05: "STOP_SENDING",
-    0x06: "CRYPTO",
-    0x07: "NEW_TOKEN",
-    0x08: "STREAM",
-    0x10: "MAX_DATA",
-    0x11: "MAX_STREAM_DATA",
-    0x12: "MAX_STREAMS",
-    0x14: "DATA_BLOCKED",
-    0x15: "STREAM_DATA_BLOCKED",
-    0x16: "STREAMS_BLOCKED",
-    0x18: "NEW_CONNECTION_ID",
-    0x19: "RETIRE_CONNECTION_ID",
-    0x1A: "PATH_CHALLENGE",
-    0x1B: "PATH_RESPONSE",
-    0x1C: "CONNECTION_CLOSE",
-    0x1E: "HANDSHAKE_DONE",
-}
-
-
-# RFC9000 sect 16
-class QuicVarIntField(Field[int, int]):
-    def addfield(self, pkt: Packet, s: bytes, val: Optional[int]):
-        val = self.i2m(pkt, val)
-        if val < 0 or val > 0x3FFFFFFFFFFFFFFF:
-            raise struct.error("requires 0 <= number <= 4611686018427387903")
-        if val < 0x40:
-            return s + struct.pack("!B", val)
-        elif val < 0x4000:
-            return s + struct.pack("!H", val | 0x4000)
-        elif val < 0x40000000:
-            return s + struct.pack("!I", val | 0x80000000)
-        else:
-            return s + struct.pack("!Q", val | 0xC000000000000000)
-
-    def getfield(self, pkt: Packet, s: bytes) -> Tuple[bytes, int]:
-        length = (s[0] & 0xC0) >> 6
-        if length == 0:
-            return s[1:], struct.unpack("!B", s[:1])[0] & 0x3F
-        elif length == 1:
-            return s[2:], struct.unpack("!H", s[:2])[0] & 0x3FFF
-        elif length == 2:
-            return s[4:], struct.unpack("!I", s[:4])[0] & 0x3FFFFFFF
-        elif length == 3:
-            return s[8:], struct.unpack("!Q", s[:8])[0] & 0x3FFFFFFFFFFFFFFF
-        else:
-            raise Exception("Impossible.")
-
-
-class QuicVarLenField(FieldLenField, QuicVarIntField):
-    pass
-
-
-class QuicVarEnumField(QuicVarIntField, _EnumField[int]):
-    __slots__ = EnumField.__slots__
-
-    def __init__(self, name, default, enum):
-        # type: (str, Optional[int], Any, int) -> None
-        _EnumField.__init__(self, name, default, enum)  # type: ignore
-        QuicVarIntField.__init__(self, name, default)
-
-    def any2i(self, pkt, x):
-        # type: (Optional[Packet], Any) -> int
-        return _EnumField.any2i(self, pkt, x)  # type: ignore
-
-    def i2repr(
-        self,
-        pkt,  # type: Optional[Packet]
-        x,  # type: int
-    ):
-        # type: (...) -> Any
-        return _EnumField.i2repr(self, pkt, x)
+from scapy.layers.quic.connection import _GenericQUICConnectionInheritance
 
 
 # -- Headers --
@@ -144,7 +55,7 @@ _quic_long_pkttyp = {
 # RFC9000 sect 17 abstraction
 
 
-class QUIC(Packet):
+class QUIC(_GenericQUICConnectionInheritance):
     match_subclass = True
 
     @classmethod
@@ -315,93 +226,7 @@ class QUIC_1RTT(QUIC):
     ]
 
 
-# RFC9000 sect 19.1
-class QUIC_PADDING(Packet):
-    fields_desc = [
-        ByteEnumField("Type", 0x00, _quic_payloads),
-    ]
-
-
-# RFC9000 sect 19.2
-class QUIC_PING(Packet):
-    fields_desc = [
-        ByteEnumField("Type", 0x01, _quic_payloads),
-    ]
-
-
-# RFC9000 sect 19.3
-class QUIC_ACK(Packet):
-    fields_desc = [
-        ByteEnumField("Type", 0x02, _quic_payloads),
-    ]
-
-
 # Bindings
 bind_bottom_up(UDP, QUIC, dport=443)
 bind_bottom_up(UDP, QUIC, sport=443)
 bind_layers(UDP, QUIC, dport=443, sport=443)
-
-
-# Automata
-
-
-class QUICClientAutomaton(TLSClientAutomaton):
-    """
-    A simple QUIC client automaton. Try to overload some states or
-    conditions and see what happens on the other side.
-
-    This takes the same arguments as TLSClientAutomaton, because we just
-    wrap it until the handshake is finished, at which point we switch to custom code.
-    See help(TLSClientAutomaton) for more information.
-    """
-
-    def parse_args(self, server="127.0.0.1", dport=443, **kwargs):
-        super(QUICClientAutomaton, self).parse_args(
-            server=server,
-            dport=dport,
-            version="tls13",
-            **kwargs,
-        )
-
-    # Change some functions of TLSAutomaton to send/receive QUIC messages
-    # during the handshake.
-
-    def get_next_msg(self, socket_timeout=2, retry=2):
-        if self.buffer_in:
-            # A message is already available.
-            return
-
-    def flush_records(self):
-        s = b"".join(p.raw_stateful() for p in self.buffer_out)
-        self.socket.send(s)
-        self.buffer_out = []
-
-    # Change some steps of the TLS automaton to act QUIC like
-
-    @ATMT.state()
-    def CONNECT(self):
-        s = socket.socket(self.remote_family, socket.SOCK_DGRAM)
-        self.vprint()
-        self.vprint("Trying to connect on %s:%d" % (self.remote_ip, self.remote_port))
-        s.connect((self.remote_ip, self.remote_port))
-        self.socket = s
-        self.local_ip, self.local_port = self.socket.getsockname()[:2]
-        self.vprint()
-        raise self.TLS13_START()
-
-    @ATMT.state()
-    def TLS13_ADDED_CLIENTHELLO(self):
-        raise self.QUIC_SENDING_INITIAL()
-
-    @ATMT.state()
-    def QUIC_SENDING_INITIAL(self):
-        pass
-
-    @ATMT.condition(QUIC_SENDING_INITIAL)
-    def quic_should_send_initial(self):
-        self.flush_records()
-        raise self.QUIC_SENT_INITIAL()
-
-    @ATMT.state()
-    def QUIC_SENT_INITIAL(self):
-        raise self.TLS13_WAITING_SERVERFLIGHT1()

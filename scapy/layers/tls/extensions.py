@@ -35,7 +35,7 @@ from scapy.layers.tls.keyexchange import (SigAndHashAlgsLenField,
 from scapy.layers.tls.session import _GenericTLSSessionInheritance
 from scapy.layers.tls.crypto.groups import _tls_named_groups
 from scapy.layers.tls.crypto.suites import _tls_cipher_suites
-from scapy.layers.tls.quic import _QuicTransportParametersField
+from scapy.layers.tls.quic_tp import _QuicTransportParametersField
 from scapy.themes import AnsiColorTheme
 from scapy.compat import raw
 from scapy.config import conf
