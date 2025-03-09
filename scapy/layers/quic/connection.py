@@ -7,7 +7,6 @@ QUIC connection handler.
 """
 
 from scapy.packet import Packet
-from scapy.layers.inet import UDP
 
 # RFC 9000 sect 5 - Connections
 # https://datatracker.ietf.org/doc/html/rfc9000#name-connections
@@ -15,7 +14,8 @@ from scapy.layers.inet import UDP
 
 class quicConnection(object):
     def __init__(self):
-        pass
+        # Is false whenever a packet cannot be decrypted
+        self.decrypted = False
 
 
 class _GenericQUICConnectionInheritance(Packet):

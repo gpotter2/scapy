@@ -72,8 +72,6 @@ class QUICClientAutomaton(_QUICAutomaton):
 
     @ATMT.condition(QUIC_START)
     def quic_should_add_Initial(self):
-        
-        self.add_msg(p)
         raise self.QUIC_ADDED_INITIAL()
 
     @ATMT.state()

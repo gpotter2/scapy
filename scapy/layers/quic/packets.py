@@ -7,32 +7,29 @@
 QUIC Packet formats per RFC9000 sect 17
 """
 
-import struct
-
 from scapy.packet import (
-    Packet,
     bind_bottom_up,
     bind_layers,
 )
 from scapy.fields import (
     BitEnumField,
     BitField,
-    ByteField,
     FieldLenField,
     FieldListField,
     IntField,
-    MultipleTypeField,
-    ShortField,
     StrLenField,
-    ThreeBytesField,
 )
 from scapy.layers.inet import UDP
 
 from scapy.layers.quic.basefields import (
+    _QuicPacketNumberBitFieldLenField,
+    _QuicPacketNumberField,
+    _QuicReservedBitField,
     QuicVarIntField,
     QuicVarLenField,
 )
 from scapy.layers.quic.connection import _GenericQUICConnectionInheritance
+from scapy.layers.quic.frames import _QUICFramesField
 
 
 # -- Headers --
@@ -56,6 +53,12 @@ _quic_long_pkttyp = {
 
 
 class QUIC(_GenericQUICConnectionInheritance):
+    """
+    Generic QUIC packet. This implements all formats specified in RFC9000 sect 17.
+
+    .pre_dissect() performs data decryption, .post_build() performs encryption.
+    """
+
     match_subclass = True
 
     @classmethod
@@ -85,6 +88,12 @@ class QUIC(_GenericQUICConnectionInheritance):
     def mysummary(self):
         return self.name
 
+    def post_build(self, pkt, pay):
+        """
+        Apply encryption if necessary.
+        """
+        return pkt + pay
+
 
 # RFC9000 sect 17.2.1
 
@@ -105,59 +114,6 @@ class QUIC_Version(QUIC):
 
 # RFC9000 sect 17.2.2
 
-QuicPacketNumberField = lambda name, default: MultipleTypeField(
-    [
-        (
-            ByteField(name, default),
-            (
-                lambda pkt: pkt.PacketNumberLen == 0,
-                lambda _, val: val < 0x100,
-            ),
-        ),
-        (
-            ShortField(name, default),
-            (
-                lambda pkt: pkt.PacketNumberLen == 1,
-                lambda _, val: val < 0x10000,
-            ),
-        ),
-        (
-            ThreeBytesField(name, default),
-            (
-                lambda pkt: pkt.PacketNumberLen == 2,
-                lambda _, val: val < 0x1000000,
-            ),
-        ),
-        (
-            IntField(name, default),
-            (
-                lambda pkt: pkt.PacketNumberLen == 3,
-                lambda _, val: val < 0x100000000,
-            ),
-        ),
-    ],
-    ByteField(name, default),
-)
-
-
-class QuicPacketNumberBitFieldLenField(BitField):
-    def i2m(self, pkt, x):
-        if x is None and pkt is not None:
-            PacketNumber = pkt.PacketNumber or 0
-            if PacketNumber < 0 or PacketNumber > 0xFFFFFFFF:
-                raise struct.error("requires 0 <= number <= 0xFFFFFFFF")
-            if PacketNumber < 0x100:
-                return 0
-            elif PacketNumber < 0x10000:
-                return 1
-            elif PacketNumber < 0x1000000:
-                return 2
-            else:
-                return 3
-        elif x is None:
-            return 0
-        return x
-
 
 class QUIC_Initial(QUIC):
     name = "QUIC - Initial"
@@ -167,15 +123,16 @@ class QUIC_Initial(QUIC):
             BitEnumField("HeaderForm", 1, 1, _quic_long_hdr),
             BitField("FixedBit", 1, 1),
             BitEnumField("LongPacketType", 0, 2, _quic_long_pkttyp),
-            BitField("Reserved", 0, 2),
-            QuicPacketNumberBitFieldLenField("PacketNumberLen", None, 2),
+            _QuicReservedBitField("Reserved", 0, 2),
+            _QuicPacketNumberBitFieldLenField("PacketNumberLen", None, 2),
         ]
         + QUIC_Version.fields_desc[2:7]
         + [
             QuicVarLenField("TokenLen", None, length_of="Token"),
             StrLenField("Token", "", length_from=lambda pkt: pkt.TokenLen),
             QuicVarIntField("Length", 0),
-            QuicPacketNumberField("PacketNumber", 0),
+            _QuicPacketNumberField("PacketNumber", 0),
+            _QUICFramesField("Payload", []),
         ]
     )
 
@@ -186,7 +143,8 @@ class QUIC_0RTT(QUIC):
     LongPacketType = 1
     fields_desc = QUIC_Initial.fields_desc[:10] + [
         QuicVarIntField("Length", 0),
-        QuicPacketNumberField("PacketNumber", 0),
+        _QuicPacketNumberField("PacketNumber", 0),
+        _QUICFramesField("Payload", []),
     ]
 
 
@@ -218,11 +176,12 @@ class QUIC_1RTT(QUIC):
         BitEnumField("HeaderForm", 0, 1, _quic_long_hdr),
         BitField("FixedBit", 1, 1),
         BitField("SpinBit", 0, 1),
-        BitField("Reserved", 0, 2),
+        _QuicReservedBitField("Reserved", 0, 2),
         BitField("KeyPhase", 0, 1),
-        QuicPacketNumberBitFieldLenField("PacketNumberLen", None, 2),
+        _QuicPacketNumberBitFieldLenField("PacketNumberLen", None, 2),
         # FIXME - Destination Connection ID
-        QuicPacketNumberField("PacketNumber", 0),
+        _QuicPacketNumberField("PacketNumber", 0),
+        _QUICFramesField("Payload", []),
     ]
 
 
