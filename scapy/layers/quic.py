@@ -337,6 +337,71 @@ class QUIC_ACK(Packet):
 
 
 # Bindings
-# bind_bottom_up(UDP, QUIC, dport=443)
-# bind_bottom_up(UDP, QUIC, sport=443)
-# bind_layers(UDP, QUIC, dport=443, sport=443)
+bind_bottom_up(UDP, QUIC, dport=443)
+bind_bottom_up(UDP, QUIC, sport=443)
+bind_layers(UDP, QUIC, dport=443, sport=443)
+
+
+# Automata
+
+
+class QUICClientAutomaton(TLSClientAutomaton):
+    """
+    A simple QUIC client automaton. Try to overload some states or
+    conditions and see what happens on the other side.
+
+    This takes the same arguments as TLSClientAutomaton, because we just
+    wrap it until the handshake is finished, at which point we switch to custom code.
+    See help(TLSClientAutomaton) for more information.
+    """
+
+    def parse_args(self, server="127.0.0.1", dport=443, **kwargs):
+        super(QUICClientAutomaton, self).parse_args(
+            server=server,
+            dport=dport,
+            version="tls13",
+            **kwargs,
+        )
+
+    # Change some functions of TLSAutomaton to send/receive QUIC messages
+    # during the handshake.
+
+    def get_next_msg(self, socket_timeout=2, retry=2):
+        if self.buffer_in:
+            # A message is already available.
+            return
+
+    def flush_records(self):
+        s = b"".join(p.raw_stateful() for p in self.buffer_out)
+        self.socket.send(s)
+        self.buffer_out = []
+
+    # Change some steps of the TLS automaton to act QUIC like
+
+    @ATMT.state()
+    def CONNECT(self):
+        s = socket.socket(self.remote_family, socket.SOCK_DGRAM)
+        self.vprint()
+        self.vprint("Trying to connect on %s:%d" % (self.remote_ip, self.remote_port))
+        s.connect((self.remote_ip, self.remote_port))
+        self.socket = s
+        self.local_ip, self.local_port = self.socket.getsockname()[:2]
+        self.vprint()
+        raise self.TLS13_START()
+
+    @ATMT.state()
+    def TLS13_ADDED_CLIENTHELLO(self):
+        raise self.QUIC_SENDING_INITIAL()
+
+    @ATMT.state()
+    def QUIC_SENDING_INITIAL(self):
+        pass
+
+    @ATMT.condition(QUIC_SENDING_INITIAL)
+    def quic_should_send_initial(self):
+        self.flush_records()
+        raise self.QUIC_SENT_INITIAL()
+
+    @ATMT.state()
+    def QUIC_SENT_INITIAL(self):
+        raise self.TLS13_WAITING_SERVERFLIGHT1()
