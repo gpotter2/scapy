@@ -122,6 +122,8 @@ class ColorTheme:
     style_packetlist_proto = ""
     style_packetlist_value = ""
     style_fail = ""
+    style_critical = ""
+    style_warn = ""
     style_success = ""
     style_odd = ""
     style_even = ""
@@ -196,6 +198,8 @@ class DefaultTheme(AnsiColorTheme):
     style_packetlist_proto = Color.blue
     style_packetlist_value = Color.purple
     style_fail = Color.red + Color.bold
+    style_critical = Color.white + Color.bold + Color.bg_red
+    style_warn = Color.yellow + Color.bold
     style_success = Color.blue + Color.bold
     style_even = Color.black + Color.bold
     style_odd = Color.black
@@ -220,6 +224,8 @@ class BrightTheme(AnsiColorTheme):
     style_packetlist_proto = Color.yellow + Color.bold
     style_packetlist_value = Color.purple + Color.bold
     style_fail = Color.red + Color.bold
+    style_critical = Color.white + Color.bold + Color.bg_red
+    style_warn = Color.yellow + Color.bold
     style_success = Color.blue + Color.bold
     style_even = Color.black + Color.bold
     style_odd = Color.black
@@ -243,6 +249,8 @@ class RastaTheme(AnsiColorTheme):
     style_packetlist_proto = Color.yellow + Color.bold
     style_packetlist_value = Color.green + Color.bold
     style_fail = Color.red
+    style_critical = Color.white + Color.bold + Color.bg_red
+    style_warn = Color.yellow + Color.bold
     style_success = Color.red + Color.bold
     style_even = Color.yellow
     style_odd = Color.green
@@ -267,6 +275,8 @@ class ColorOnBlackTheme(AnsiColorTheme):
     style_packetlist_proto = Color.yellow + Color.bold
     style_packetlist_value = Color.purple + Color.bold
     style_fail = Color.red + Color.bold
+    style_critical = Color.white + Color.bold + Color.bg_red
+    style_warn = Color.yellow + Color.bold
     style_success = Color.green
     style_even = Color.black + Color.bold
     style_odd = Color.white
@@ -302,6 +312,8 @@ class LatexTheme(FormatTheme):
     style_packetlist_proto = r"\textcolor{blue}{%s}"
     style_packetlist_value = r"\textcolor{purple}{%s}"
     style_fail = r"\textcolor{red}{\bf %s}"
+    style_critical = r"\colorbox{red}{\textcolor{white}{\bf %s}}"
+    style_warn = r"\textcolor{yellow}{\bf %s}"
     style_success = r"\textcolor{blue}{\bf %s}"
     style_left = r"\textcolor{blue}{%s}"
     style_right = r"\textcolor{red}{%s}"
@@ -330,6 +342,8 @@ class LatexTheme2(FormatTheme):
     style_packetlist_proto = r"@`@textcolor@[@blue@]@@[@%s@]@"
     style_packetlist_value = r"@`@textcolor@[@purple@]@@[@%s@]@"
     style_fail = r"@`@textcolor@[@red@]@@[@@`@bfseries@[@@]@%s@]@"
+    style_critical = r"@`@colorbox@[@red@]@@[@`@textcolor@[@white@]@@[@@`@bfseries@[@@]@%s@]@@]@"
+    style_warn = r"@`@textcolor@[@yellow@]@@[@@`@bfseries@[@@]@%s@]@"
     style_success = r"@`@textcolor@[@blue@]@@[@@`@bfseries@[@@]@%s@]@"
     style_even = r"@`@textcolor@[@gray@]@@[@@`@bfseries@[@@]@%s@]@"
 #    style_odd = r"@`@textcolor@[@black@]@@[@@`@bfseries@[@@]@%s@]@"
@@ -350,6 +364,8 @@ class HTMLTheme(FormatTheme):
     style_packetlist_proto = "<span class=packetlist_proto>%s</span>"
     style_packetlist_value = "<span class=packetlist_value>%s</span>"
     style_fail = "<span class=fail>%s</span>"
+    style_critical = "<span class=critical>%s</span>"
+    style_warn = "<span class=warn>%s</span>"
     style_success = "<span class=success>%s</span>"
     style_even = "<span class=even>%s</span>"
     style_odd = "<span class=odd>%s</span>"
@@ -369,6 +385,8 @@ class HTMLTheme2(HTMLTheme):
     style_packetlist_proto = "#[#span class=packetlist_proto#]#%s#[#/span#]#"
     style_packetlist_value = "#[#span class=packetlist_value#]#%s#[#/span#]#"
     style_fail = "#[#span class=fail#]#%s#[#/span#]#"
+    style_critical = "#[#span class=critical#]#%s#[#/span#]#"
+    style_warn = "#[#span class=warn#]#%s#[#/span#]#"
     style_success = "#[#span class=success#]#%s#[#/span#]#"
     style_even = "#[#span class=even#]#%s#[#/span#]#"
     style_odd = "#[#span class=odd#]#%s#[#/span#]#"

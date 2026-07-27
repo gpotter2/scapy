@@ -4506,7 +4506,7 @@ def krb_as_req(
     key: Optional["Key"] = None,
     password: Optional[str] = None,
     realm: Optional[str] = None,
-    host: str = "WIN10",
+    host: str = "WIN11",
     p12: Optional[str] = None,
     x509: Optional[Union[str, Cert]] = None,
     x509key: Optional[Union[str, PrivKey]] = None,
@@ -4614,15 +4614,8 @@ def krb_tgs_req(
 
     Example::
 
-        >>> # The KDC is on 192.168.122.17, we ask a TGT for user1
-        >>> krb_as_req("user1@DOMAIN.LOCAL", "192.168.122.17", password="Password1")
-
-    Equivalent::
-
-        >>> from scapy.libs.rfc3961 import Key, EncryptionType
-        >>> key = Key(EncryptionType.AES256_CTS_HMAC_SHA1_96, key=hex_bytes("6d0748c546
-        ...: f4e99205e78f8da7681d4ec5520ae4815543720c2a647c1ae814c9"))
-        >>> krb_as_req("user1@DOMAIN.LOCAL", "192.168.122.17", key=key)
+        >>> res = krb_as_req("user1@DOMAIN.LOCAL", etypes=[EncryptionType.RC4_HMAC])
+        >>> krb_tgs_req("user1@DOMAIN.LOCAL", "host/DC1", sessionkey=res.sessionkey, ticket=res.asrep.ticket)
     """
     cli = KerberosClient(
         mode=KerberosClient.MODE.TGS_REQ,

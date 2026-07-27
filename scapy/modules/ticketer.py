@@ -581,12 +581,24 @@ class Ticketer:
         Show the content of a CCache
         """
 
-        def _to_str(x):
+        def _to_str(x, wpast=False, wfuture=False):
+            """
+            Show a timestamp.
+
+            :param wpast: warn if the timestamp is in the past
+            :param wfuture: warn if the timestamp is in the future
+            """
             if x is None:
                 return "None"
             else:
-                x = datetime.fromtimestamp(x, tz=timezone.utc if utc else None)
-            return x.strftime("%d/%m/%y %H:%M:%S")
+                tz = timezone.utc if utc else None
+                x = datetime.fromtimestamp(x, tz=tz)
+                rep = x.strftime("%d/%m/%y %H:%M:%S")
+                if wpast and x < datetime.now(tz=tz):
+                    return conf.color_theme.critical(rep)
+                if wfuture and x > datetime.now(tz=tz):
+                    return conf.color_theme.critical(rep)
+                return rep
 
         # Show Keytab
         if self.keytab.entries:
@@ -613,7 +625,10 @@ class Ticketer:
             return
         else:
             if self.ccache.primary_principal.components:
-                print("Default principal: %s\n" % self.ccache.primary_principal.toPN())
+                print(
+                    "Default principal: %s\n"
+                    % conf.color_theme.green(self.ccache.primary_principal.toPN())
+                )
 
             print("CCache tickets:")
 
@@ -628,7 +643,7 @@ class Ticketer:
                 len(cred.server.components) not in [2, 3]
                 or cred.server.components[0].data != b"krb5_ccache_conf_data"
             ):
-                print("Skipping invalid X-CACHECONF !")
+                print(conf.color_theme.warn("Skipping invalid X-CACHECONF !"))
                 continue
 
             # Get all the values from this weird format
@@ -656,9 +671,9 @@ class Ticketer:
             print(
                 "%s. %s -> %s"
                 % (
-                    i,
-                    cname,
-                    sname,
+                    conf.color_theme.blue(i),
+                    conf.color_theme.green(cname),
+                    conf.color_theme.blue(sname),
                 )
             )
             print(cred.sprintf("   %ticket_flags%"))
@@ -676,9 +691,9 @@ class Ticketer:
                 pretty_list(
                     [
                         (
-                            _to_str(cred.starttime),
-                            _to_str(cred.endtime),
-                            _to_str(cred.renew_till),
+                            _to_str(cred.starttime, wfuture=True),
+                            _to_str(cred.endtime, wpast=True),
+                            _to_str(cred.renew_till, wpast=True),
                             _to_str(cred.authtime),
                         )
                     ],
@@ -949,7 +964,13 @@ class Ticketer:
         """
         Export a full ticket, session key, UPN and SPN.
         """
-        cred = self.ccache.credentials[i]
+        try:
+            cred = self.ccache.credentials[i]
+            if cred.is_xcacheconf():
+                raise IndexError
+        except IndexError:
+            raise ValueError(f"Ticket number '{i}' is out of range !")
+
         return (
             KRB_Ticket(cred.ticket.data),
             cred.keyblock.toKey(),

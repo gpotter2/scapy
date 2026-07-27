@@ -3963,6 +3963,8 @@ def AutoArgparse(
       untyped arguments are ignored.
     - only types that would be supported by argparse are supported. The others
       are omitted.
+    - if a line of docstring is with "EXAMPLES", then the lines below it will
+      be considered an epilog instead of the description.
     """
     argsdoc = {}
     if func.__doc__:
@@ -3988,6 +3990,12 @@ def AutoArgparse(
                     argsdoc[argparam] = argdesc
     else:
         desc = ""
+
+    # If "Example" is on a new line, move to epilog
+    epilog = None
+    if "\nEXAMPLES" in desc:
+        desc, epilog = desc.split("\nEXAMPLES", 1)
+        epilog = "EXAMPLES" + epilog
 
     # Process the parameters
     positional = []
@@ -4057,11 +4065,20 @@ def AutoArgparse(
             [x for x in noargument if x not in positional] + ["--help"],
         )
 
+    # Act as in interactive mode
+    conf.logLevel = 20
+    from scapy.themes import DefaultTheme
+    conf.color_theme = DefaultTheme()
+
     # Now build the argparse.ArgumentParser
     parser = argparse.ArgumentParser(
         prog=func.__name__,
         description=desc,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        **({
+            "exit_on_error": False
+        } if sys.version_info >= (3, 9) else {})
     )
 
     # Add parameters to parser
@@ -4069,7 +4086,12 @@ def AutoArgparse(
         parser.add_argument(parname, **paramkwargs)
 
     # Now parse the sys.argv parameters
-    params = vars(parser.parse_args())
+    try:
+        params = vars(parser.parse_args())
+    except argparse.ArgumentError as ex:
+        print(conf.color_theme.fail("ERROR: " + str(ex)))
+        parser.print_help()
+        sys.exit(1)
 
     # Convert hex parameters if provided
     for p in hexarguments:
@@ -4085,10 +4107,6 @@ def AutoArgparse(
                 )
                 return None
 
-    # Act as in interactive mode
-    conf.logLevel = 20
-    from scapy.themes import DefaultTheme
-    conf.color_theme = DefaultTheme()
     # And call the function
     try:
         func(
